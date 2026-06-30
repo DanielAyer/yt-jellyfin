@@ -1,5 +1,3 @@
-# This project is for personal and non-commercial use ONLY!  No authorization is given to monetize or commercially distribute this project.
-
 # yt-jellyfin
 
 A self-hosted web app that automatically syncs YouTube channels into your [Jellyfin](https://jellyfin.org/) media library using [yt-dlp](https://github.com/yt-dlp/yt-dlp).
@@ -35,6 +33,12 @@ Add a channel, set a sync schedule (or trigger it manually), and new uploads lan
 - [`yt-dlp`](https://github.com/yt-dlp/yt-dlp) installed and on `PATH`
 - An existing [Jellyfin](https://jellyfin.org/) server with a library you control
 - A folder where downloaded videos will live (ideally on the same drive/volume as your Jellyfin library)
+
+---
+
+## Quickstart, in plain English
+
+Pull this repo down to the machine that will run it (ideally the same machine running Jellyfin, or one with network access to its library folder). Copy `.env.example` to `.env`, then open it and fill in two values: where your videos should be saved (`LIBRARY_ROOT`) and where the app's small database file should live (`DB_PATH`). Install the Python dependencies, start the app, and point your browser at it. From there, everything else — adding channels, setting a schedule, picking which old videos to grab — happens in the web UI.
 
 ---
 
@@ -149,6 +153,70 @@ yt-jellyfin.service    systemd unit file
 - Tile and dashboard state updates are manual-refresh based, not real-time. A future pass could move to SSE or batched polling for live updates — see the `TODO` in `static/js/videos.js`.
 - Single-user, local-network design — no auth layer. Don't expose this directly to the internet without putting a reverse proxy with auth in front of it.
 - Filename sanitization is intentionally conservative; very unusual channel names may produce awkward folder names.
+
+---
+
+## Architecture
+
+**Request flow:**
+
+```
+Browser
+  → Flask routes (app.py)
+    → business logic (downloader.py / scheduler.py)
+      → database.py (SQLite)
+      → filesystem (LIBRARY_ROOT)
+```
+
+**Layer breakdown:**
+
+- **`config.py`** — Loads and validates environment variables (`LIBRARY_ROOT`, `DB_PATH`, `HOST`, `PORT`). This runs first, before any other module is imported, so a misconfigured environment fails immediately with a clear error message instead of a confusing stack trace deeper in the app.
+
+- **`database.py`** — SQLite connection helper (`get_db()`) and schema definition (`init_db()`). Four tables:
+  - `channels` — one row per tracked channel, including thumbnail URL and sync stats
+  - `videos` — one row per video ever seen, keyed by YouTube's `video_id` so a video is never downloaded twice
+  - `video_thumbnails` — per-video thumbnail URLs, kept separate from the main `videos` table
+  - `settings` — key-value store for schedule configuration, editable live from the UI
+
+- **`downloader.py`** — All `yt-dlp` interaction lives here. Three responsibilities: resolving a channel URL into its ID, name, and thumbnail; fetching a flat list of video metadata for a channel; and invoking `yt-dlp` to actually download a video into `LIBRARY_ROOT/<ChannelName>/`. Also contains the sync logic that decides *which* videos to grab on each run — the N most recent uploads plus N videos from the back catalog.
+
+- **`scheduler.py`** — Wraps APScheduler. Reads the `settings` table to decide whether to run on a fixed interval, daily at a specific time, once on boot, or not at all (manual only). Settings are re-read live whenever changed in the UI — no service restart required.
+
+- **`app.py`** — The Flask app itself. Each route is a thin layer: validate input, kick off work (either a fast synchronous DB read, or a background thread for anything involving `yt-dlp`), and return JSON. In-progress background tasks are tracked in an in-memory dict so the frontend can poll `/api/tasks/status` to know what's currently running.
+
+- **`templates/` + `static/`** — Server-rendered HTML shells (Jinja2) with vanilla JavaScript driving all interactivity through `fetch` calls to the JSON API. No frontend framework or build step, to keep installation simple.
+
+**Example data flow — triggering a sync:**
+
+1. User clicks **Sync Now** → `POST /api/channels/<id>/sync`
+2. The route spawns a background thread running `sync_channel()` in `downloader.py`
+3. That function calls `yt-dlp` to fetch the channel's current video list, upserts any new video stubs into the `videos` table, then downloads whichever ones are selected for this run (recent uploads + back-catalog slice) via `yt-dlp` again
+4. Each completed download updates that video's row to `status='downloaded'` and increments the channel's running totals
+5. The frontend polls `/api/tasks/status` until the task clears, then re-fetches `/api/channels` to display the updated numbers
+
+**File structure:**
+
+```
+yt-jellyfin/
+├── app.py                 Flask app + all API routes
+├── config.py               Centralized configuration (env vars, validation)
+├── database.py             SQLite schema + connection handling
+├── downloader.py            yt-dlp wrapper + sync/download logic
+├── scheduler.py             APScheduler job management
+├── requirements.txt         Python dependencies
+├── .env.example             Configuration template (copy to .env)
+├── yt-jellyfin.service       systemd unit file
+├── templates/
+│   ├── index.html            Main dashboard
+│   └── videos.html           Per-channel video grid / back-catalog browser
+└── static/
+    ├── css/
+    │   ├── style.css          Shared styles
+    │   └── videos.css         Video grid page styles
+    └── js/
+        ├── app.js             Dashboard logic
+        └── videos.js          Video grid / selection logic
+```
 
 ---
 
