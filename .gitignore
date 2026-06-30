@@ -1,0 +1,29 @@
+# Environment / secrets
+.env
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+venv/
+*.egg-info/
+
+# SQLite database (user-specific data, not part of the repo)
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+.ytjf.db*
+
+# Downloaded media (never belongs in the repo)
+*.mp4
+*.mkv
+*.webm
+*.info.json
+
+# OS / editor cruft
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.swp
