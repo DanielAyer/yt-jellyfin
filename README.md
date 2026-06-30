@@ -18,13 +18,6 @@ Add a channel, set a sync schedule (or trigger it manually), and new uploads lan
 - **Channel & video thumbnails** — pulled automatically from YouTube on add/sync
 - **Runs as a systemd service** — survives reboots, auto-restarts on failure
 
----
-
-## Screenshot
-
-*(add a screenshot of the dashboard here once you have one)*
-
----
 
 ## Requirements
 
