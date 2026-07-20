@@ -348,6 +348,57 @@ a:hover { text-decoration: underline; }
 input[type="number"]::-webkit-inner-spin-button { opacity: 0.4; }
 input[type="time"]::-webkit-calendar-picker-indicator { filter: invert(0.6); }
 
+/* ── disk warning banner ─────────────────────────────────────────────── */
+.disk-warning-banner {
+  position: sticky;
+  top: 0;
+  z-index: 150;
+  background: #3a1a00;
+  border-bottom: 1px solid #e07830;
+  color: #f0a060;
+  font-family: var(--mono);
+  font-size: 0.78rem;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.45rem 1.25rem;
+  letter-spacing: 0.02em;
+}
+.disk-warning-icon { font-size: 0.9rem; }
+.disk-warning-close {
+  background: transparent;
+  border: none;
+  color: #f0a060;
+  cursor: pointer;
+  font-size: 0.9rem;
+  margin-left: auto;
+  padding: 0.1rem 0.3rem;
+  opacity: 0.7;
+  transition: opacity 0.15s;
+}
+.disk-warning-close:hover { opacity: 1; }
+
+/* ── inline alert bar (download blocked) ─────────────────────────────── */
+.alert-bar {
+  background: #2a0a0a;
+  border-bottom: 1px solid var(--danger);
+  color: #f08080;
+  font-family: var(--mono);
+  font-size: 0.78rem;
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.5rem 1.25rem;
+}
+
+/* ── field note (settings helper text) ──────────────────────────────── */
+.field-note {
+  font-size: 0.72rem;
+  color: var(--muted);
+  line-height: 1.4;
+}
+
 /* ── responsive ──────────────────────────────────────────────────────── */
 @media (max-width: 520px) {
   .header-inner { flex-wrap: wrap; }

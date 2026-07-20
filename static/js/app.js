@@ -224,6 +224,7 @@ document.getElementById("btn-settings").addEventListener("click", async () => {
     document.getElementById("schedule-time").value  = s.schedule_time  || "03:00";
     document.getElementById("recent-count").value   = s.recent_count   || 5;
     document.getElementById("catalog-count").value  = s.catalog_count  || 5;
+    document.getElementById("disk-threshold").value = s.disk_threshold_pct || 10;
     document.getElementById("settings-status").textContent = "";
   } catch (e) { console.error(e); }
   document.getElementById("modal-settings").classList.remove("hidden");
@@ -236,11 +237,12 @@ document.getElementById("close-settings").addEventListener("click", () => {
 document.getElementById("btn-save-settings").addEventListener("click", async () => {
   const mode = document.querySelector('input[name="schedule_mode"]:checked')?.value;
   const body = {
-    schedule_mode:  mode,
-    schedule_hours: document.getElementById("schedule-hours").value,
-    schedule_time:  document.getElementById("schedule-time").value,
-    recent_count:   document.getElementById("recent-count").value,
-    catalog_count:  document.getElementById("catalog-count").value,
+    schedule_mode:       mode,
+    schedule_hours:      document.getElementById("schedule-hours").value,
+    schedule_time:       document.getElementById("schedule-time").value,
+    recent_count:        document.getElementById("recent-count").value,
+    catalog_count:       document.getElementById("catalog-count").value,
+    disk_threshold_pct:  document.getElementById("disk-threshold").value,
   };
   const status = document.getElementById("settings-status");
   try {
@@ -286,8 +288,65 @@ async function pollUntilDone(taskId, card, channelId, maxWait = 300000) {
   setCardBusy(card, false);
 }
 
+/* ── disk warning banner ─────────────────────────────────────────────── */
+let _diskWarningDismissed = false;
+
+async function checkDiskSpace() {
+  try {
+    const status = await fetch("/api/disk/status").then(r => r.json());
+    const banner  = document.getElementById("disk-warning-banner");
+    const text    = document.getElementById("disk-warning-text");
+
+    if (!status.ok) {
+      text.textContent = `⚠ Warning: Low Disk Space — ${status.message}`;
+      // Show again even if previously dismissed (spec: re-show on new warning event)
+      if (!_diskWarningDismissed) {
+        banner.classList.remove("hidden");
+      } else {
+        // New warning state — reset dismiss so it shows again
+        _diskWarningDismissed = false;
+        banner.classList.remove("hidden");
+      }
+    } else {
+      // Space is fine — clear banner and reset dismiss flag
+      banner.classList.add("hidden");
+      _diskWarningDismissed = false;
+    }
+  } catch (_) { /* network blip — leave banner as-is */ }
+}
+
+document.getElementById("disk-warning-close").addEventListener("click", () => {
+  document.getElementById("disk-warning-banner").classList.add("hidden");
+  _diskWarningDismissed = true;
+});
+
+/* ── inline alert bar ────────────────────────────────────────────────── */
+function showAlert(message) {
+  const bar  = document.getElementById("alert-bar");
+  const text = document.getElementById("alert-bar-text");
+  text.textContent = message;
+  bar.classList.remove("hidden");
+}
+
+document.getElementById("alert-bar-close").addEventListener("click", () => {
+  document.getElementById("alert-bar").classList.add("hidden");
+});
+
+/* ── handle low_disk errors from download endpoints ──────────────────── */
+function handleApiError(e, card) {
+  if (e.message === "low_disk") {
+    checkDiskSpace(); // trigger banner immediately
+    showAlert("Download blocked: disk space is below your threshold. Free up space or adjust the limit in Settings.");
+  } else {
+    showAlert(`Error: ${e.message}`);
+  }
+  if (card) setCardBusy(card, false);
+}
+
 /* ── auto-refresh every 60s ──────────────────────────────────────────── */
 setInterval(loadChannels, 60_000);
+setInterval(checkDiskSpace, 60_000);
 
 /* ── init ────────────────────────────────────────────────────────────── */
 loadChannels();
+checkDiskSpace();

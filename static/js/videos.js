@@ -172,7 +172,13 @@ document.getElementById("btn-download-selected").addEventListener("click", async
     selected.clear();
     updateDownloadBtn();
   } catch (e) {
-    status.innerHTML = `✗ Failed: ${e.message}`;
+    if (e.message === "low_disk") {
+      checkDiskSpace();
+      showAlert("Download blocked: disk space is below your threshold. Free up space or adjust the limit in Settings.");
+      status.classList.add("hidden");
+    } else {
+      status.innerHTML = `✗ Failed: ${e.message}`;
+    }
     btn.disabled = false;
   }
 });
@@ -197,5 +203,44 @@ document.querySelectorAll(".filter-btn").forEach(btn => {
   });
 });
 
+/* ── disk warning banner ─────────────────────────────────────────────── */
+let _diskWarningDismissed = false;
+
+async function checkDiskSpace() {
+  try {
+    const status = await fetch("/api/disk/status").then(r => r.json());
+    const banner = document.getElementById("disk-warning-banner");
+    const text   = document.getElementById("disk-warning-text");
+    if (!status.ok) {
+      text.textContent = `⚠ Warning: Low Disk Space — ${status.free_pct?.toFixed(1)}% free`;
+      if (!_diskWarningDismissed) banner.classList.remove("hidden");
+      else { _diskWarningDismissed = false; banner.classList.remove("hidden"); }
+    } else {
+      banner.classList.add("hidden");
+      _diskWarningDismissed = false;
+    }
+  } catch (_) {}
+}
+
+document.getElementById("disk-warning-close")?.addEventListener("click", () => {
+  document.getElementById("disk-warning-banner").classList.add("hidden");
+  _diskWarningDismissed = true;
+});
+
+document.getElementById("alert-bar-close")?.addEventListener("click", () => {
+  document.getElementById("alert-bar").classList.add("hidden");
+});
+
+function showAlert(message) {
+  const bar  = document.getElementById("alert-bar");
+  const text = document.getElementById("alert-bar-text");
+  if (!bar || !text) return;
+  text.textContent = message;
+  bar.classList.remove("hidden");
+}
+
+setInterval(checkDiskSpace, 60_000);
+
 /* ── init ────────────────────────────────────────────────────────────── */
+checkDiskSpace();
 loadVideos();
