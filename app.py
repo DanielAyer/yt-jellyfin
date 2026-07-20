@@ -2,7 +2,6 @@ import logging
 import threading
 
 # Validate required config before importing anything that depends on it
-# (database.py reads DB_PATH at import time).
 from config import HOST, PORT, validate_config
 validate_config()
 
@@ -15,6 +14,9 @@ from downloader import (
     download_back_catalog,
     sync_all_channels,
     download_videos_by_id,
+    delete_video_file,
+    delete_channel_folder,
+    refresh_last_viewed,
 )
 from disk_space import check_library_space, check_space
 from scheduler import start_scheduler, apply_schedule
@@ -71,10 +73,6 @@ def videos_page(channel_id):
 
 @app.route("/api/disk/status")
 def disk_status():
-    """
-    Returns disk space status for the library partition.
-    The frontend polls this to drive the low-disk-space warning banner.
-    """
     result = check_library_space()
     return jsonify(result)
 
@@ -90,7 +88,7 @@ def list_channels():
                        WHERE v.channel_id = c.channel_id AND v.status = 'downloaded'
                          AND (v.archived IS NULL OR v.archived = 0)) as downloaded_count,
                       (SELECT COUNT(*) FROM videos v
-                       WHERE v.channel_id = c.channel_id AND v.status = 'pending')  as pending_count
+                       WHERE v.channel_id = c.channel_id AND v.status = 'pending') as pending_count
                FROM channels c ORDER BY c.channel_name"""
         ).fetchall()
     channels = [dict(r) for r in rows]
@@ -172,6 +170,22 @@ def add_channel():
 
 @app.route("/api/channels/<channel_id>", methods=["DELETE"])
 def remove_channel(channel_id):
+    """
+    Remove a channel from the app and delete all its files from disk.
+    This is intentional — the app is self-contained. Removing a channel
+    removes everything associated with it.
+    """
+    with get_db() as conn:
+        ch = conn.execute(
+            "SELECT * FROM channels WHERE channel_id = ?", (channel_id,)
+        ).fetchone()
+    if not ch:
+        return jsonify({"error": "channel not found"}), 404
+
+    # Delete files from disk first
+    delete_channel_folder(ch["channel_name"])
+
+    # Then remove DB records
     with get_db() as conn:
         conn.execute(
             "DELETE FROM video_thumbnails WHERE video_id IN "
@@ -179,6 +193,37 @@ def remove_channel(channel_id):
         )
         conn.execute("DELETE FROM videos WHERE channel_id = ?", (channel_id,))
         conn.execute("DELETE FROM channels WHERE channel_id = ?", (channel_id,))
+
+    return jsonify({"ok": True})
+
+
+# ── video delete API ───────────────────────────────────────────────────────────
+
+@app.route("/api/videos/<video_id>", methods=["DELETE"])
+def remove_video(video_id):
+    """
+    Delete a single video file from disk and remove its DB record.
+    """
+    with get_db() as conn:
+        row = conn.execute(
+            "SELECT * FROM videos WHERE video_id = ?", (video_id,)
+        ).fetchone()
+    if not row:
+        return jsonify({"error": "video not found"}), 404
+
+    # Delete file from disk
+    if row["file_path"]:
+        delete_video_file(row["file_path"])
+
+    # Remove from DB
+    with get_db() as conn:
+        conn.execute("DELETE FROM video_thumbnails WHERE video_id = ?", (video_id,))
+        conn.execute("DELETE FROM videos WHERE video_id = ?", (video_id,))
+        conn.execute(
+            "UPDATE channels SET total_downloaded = MAX(0, total_downloaded - 1) "
+            "WHERE channel_id = ?", (row["channel_id"],)
+        )
+
     return jsonify({"ok": True})
 
 
@@ -186,7 +231,6 @@ def remove_channel(channel_id):
 
 @app.route("/api/channels/<channel_id>/sync", methods=["POST"])
 def manual_sync(channel_id):
-    # Disk space check before allowing sync
     space = check_library_space()
     if not space["ok"]:
         return jsonify({"error": "low_disk", "message": space["message"]}), 507
@@ -287,7 +331,6 @@ def update_settings():
     with get_db() as conn:
         for key, value in data.items():
             if key in allowed:
-                # enforce hard floor on disk threshold
                 if key == "disk_threshold_pct":
                     try:
                         value = str(max(5.0, float(value)))
@@ -328,5 +371,7 @@ def list_videos(channel_id):
 
 
 if __name__ == "__main__":
+    # Refresh last_viewed from filesystem on boot
+    _bg("boot_last_viewed", refresh_last_viewed)
     start_scheduler()
     app.run(host=HOST, port=PORT, debug=False)
