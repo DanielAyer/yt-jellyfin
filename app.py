@@ -16,7 +16,8 @@ from downloader import (
     sync_all_channels,
     download_videos_by_id,
 )
-from scheduler import start_scheduler, apply_schedule, scheduler
+from disk_space import check_library_space, check_space
+from scheduler import start_scheduler, apply_schedule
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 log = logging.getLogger(__name__)
@@ -24,7 +25,7 @@ log = logging.getLogger(__name__)
 app = Flask(__name__)
 init_db()
 
-# ── background task runner (fire-and-forget) ───────────────────────────────────
+# ── background task runner ─────────────────────────────────────────────────────
 
 _running_tasks: dict[str, bool] = {}
 _task_lock = threading.Lock()
@@ -66,6 +67,18 @@ def videos_page(channel_id):
     return render_template("videos.html", channel=dict(ch))
 
 
+# ── disk space API ─────────────────────────────────────────────────────────────
+
+@app.route("/api/disk/status")
+def disk_status():
+    """
+    Returns disk space status for the library partition.
+    The frontend polls this to drive the low-disk-space warning banner.
+    """
+    result = check_library_space()
+    return jsonify(result)
+
+
 # ── channels API ───────────────────────────────────────────────────────────────
 
 @app.route("/api/channels", methods=["GET"])
@@ -73,8 +86,11 @@ def list_channels():
     with get_db() as conn:
         rows = conn.execute(
             """SELECT c.*,
-                      (SELECT COUNT(*) FROM videos v WHERE v.channel_id = c.channel_id AND v.status = 'downloaded') as downloaded_count,
-                      (SELECT COUNT(*) FROM videos v WHERE v.channel_id = c.channel_id AND v.status = 'pending')    as pending_count
+                      (SELECT COUNT(*) FROM videos v
+                       WHERE v.channel_id = c.channel_id AND v.status = 'downloaded'
+                         AND (v.archived IS NULL OR v.archived = 0)) as downloaded_count,
+                      (SELECT COUNT(*) FROM videos v
+                       WHERE v.channel_id = c.channel_id AND v.status = 'pending')  as pending_count
                FROM channels c ORDER BY c.channel_name"""
         ).fetchall()
     channels = [dict(r) for r in rows]
@@ -124,7 +140,6 @@ def add_channel():
             (channel_id, channel_name, url, thumbnail_url),
         )
 
-    # kick off initial metadata fetch in background
     def _initial_sync():
         videos = fetch_channel_metadata(url)
         if videos:
@@ -158,7 +173,10 @@ def add_channel():
 @app.route("/api/channels/<channel_id>", methods=["DELETE"])
 def remove_channel(channel_id):
     with get_db() as conn:
-        conn.execute("DELETE FROM video_thumbnails WHERE video_id IN (SELECT video_id FROM videos WHERE channel_id = ?)", (channel_id,))
+        conn.execute(
+            "DELETE FROM video_thumbnails WHERE video_id IN "
+            "(SELECT video_id FROM videos WHERE channel_id = ?)", (channel_id,)
+        )
         conn.execute("DELETE FROM videos WHERE channel_id = ?", (channel_id,))
         conn.execute("DELETE FROM channels WHERE channel_id = ?", (channel_id,))
     return jsonify({"ok": True})
@@ -168,6 +186,11 @@ def remove_channel(channel_id):
 
 @app.route("/api/channels/<channel_id>/sync", methods=["POST"])
 def manual_sync(channel_id):
+    # Disk space check before allowing sync
+    space = check_library_space()
+    if not space["ok"]:
+        return jsonify({"error": "low_disk", "message": space["message"]}), 507
+
     task_id = f"sync_{channel_id}"
     if _is_busy(task_id):
         return jsonify({"error": "already running"}), 409
@@ -183,6 +206,10 @@ def manual_sync(channel_id):
 
 @app.route("/api/channels/<channel_id>/catalog", methods=["POST"])
 def back_catalog(channel_id):
+    space = check_library_space()
+    if not space["ok"]:
+        return jsonify({"error": "low_disk", "message": space["message"]}), 507
+
     data = request.json or {}
     try:
         count = max(1, int(data.get("count", 10)))
@@ -199,7 +226,10 @@ def back_catalog(channel_id):
 
 @app.route("/api/channels/<channel_id>/download", methods=["POST"])
 def download_selected(channel_id):
-    """Download a specific list of video IDs."""
+    space = check_library_space()
+    if not space["ok"]:
+        return jsonify({"error": "low_disk", "message": space["message"]}), 507
+
     data = request.json or {}
     video_ids = data.get("video_ids", [])
     if not video_ids:
@@ -215,6 +245,10 @@ def download_selected(channel_id):
 
 @app.route("/api/sync-all", methods=["POST"])
 def sync_all():
+    space = check_library_space()
+    if not space["ok"]:
+        return jsonify({"error": "low_disk", "message": space["message"]}), 507
+
     task_id = "sync_all_manual"
     if _is_busy(task_id):
         return jsonify({"error": "already running"}), 409
@@ -246,10 +280,19 @@ def get_settings():
 @app.route("/api/settings", methods=["POST"])
 def update_settings():
     data = request.json or {}
-    allowed = {"schedule_mode", "schedule_hours", "schedule_time", "recent_count", "catalog_count"}
+    allowed = {
+        "schedule_mode", "schedule_hours", "schedule_time",
+        "recent_count", "catalog_count", "disk_threshold_pct",
+    }
     with get_db() as conn:
         for key, value in data.items():
             if key in allowed:
+                # enforce hard floor on disk threshold
+                if key == "disk_threshold_pct":
+                    try:
+                        value = str(max(5.0, float(value)))
+                    except (TypeError, ValueError):
+                        value = "10"
                 conn.execute(
                     "INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)",
                     (key, str(value)),
@@ -263,7 +306,7 @@ def update_settings():
 @app.route("/api/channels/<channel_id>/videos")
 def list_videos(channel_id):
     status_filter = request.args.get("status")
-    limit = min(int(request.args.get("limit", 500)), 1000)
+    limit  = min(int(request.args.get("limit", 500)), 1000)
     offset = int(request.args.get("offset", 0))
 
     query = """
