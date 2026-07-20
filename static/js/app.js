@@ -51,6 +51,7 @@ function buildCard(ch) {
     removeChannel(ch.channel_id, card);
   });
   card.querySelector(".btn-sync").addEventListener("click", () => syncChannel(ch.channel_id, card));
+  card.querySelector(".btn-rebase").addEventListener("click", () => rebaseChannel(ch.channel_id, card));
   card.querySelector(".btn-catalog").addEventListener("click", () => openCatalog(ch));
   card.querySelector(".btn-more-videos").addEventListener("click", () => {
     window.location.href = `/channel/${ch.channel_id}/videos`;
@@ -70,7 +71,7 @@ function setCardBusy(card, busy, label = "Working…") {
   card.classList.toggle("busy", busy);
   card.querySelector(".card-busy").classList.toggle("hidden", !busy);
   card.querySelector(".busy-label").textContent = label;
-  card.querySelectorAll(".btn-sync, .btn-catalog, .btn-more-videos, .card-remove")
+  card.querySelectorAll(".btn-sync, .btn-rebase, .btn-catalog, .btn-more-videos, .card-remove")
       .forEach(b => b.disabled = busy);
 }
 
@@ -142,6 +143,17 @@ async function removeChannel(channelId, card) {
     card.style.opacity = "";
     card.style.pointerEvents = "";
     alert(`Failed to remove: ${e.message}`);
+  }
+}
+
+/* ── rebase channel ──────────────────────────────────────────────────── */
+async function rebaseChannel(channelId, card) {
+  setCardBusy(card, true, "Rebasing…");
+  try {
+    await api(`/api/channels/${channelId}/rebase`, { method: "POST" });
+    await pollUntilDone(`rebase_${channelId}`, card, channelId);
+  } catch (e) {
+    handleApiError(e, card);
   }
 }
 
@@ -225,7 +237,18 @@ document.getElementById("btn-settings").addEventListener("click", async () => {
     document.getElementById("recent-count").value   = s.recent_count   || 5;
     document.getElementById("catalog-count").value  = s.catalog_count  || 5;
     document.getElementById("disk-threshold").value = s.disk_threshold_pct || 10;
+    document.querySelectorAll('input[name="rebase_missing_action"]').forEach(r => {
+      r.checked = r.value === (s.rebase_missing_action || "download");
+    });
     document.getElementById("settings-status").textContent = "";
+
+    // Load local version into update badge
+    try {
+      const upd = await api("/api/updates/status");
+      document.getElementById("update-local-version").textContent =
+        upd.local_version ? `v${upd.local_version}` : "unknown";
+    } catch (_) {}
+
   } catch (e) { console.error(e); }
   document.getElementById("modal-settings").classList.remove("hidden");
 });
@@ -237,12 +260,13 @@ document.getElementById("close-settings").addEventListener("click", () => {
 document.getElementById("btn-save-settings").addEventListener("click", async () => {
   const mode = document.querySelector('input[name="schedule_mode"]:checked')?.value;
   const body = {
-    schedule_mode:       mode,
-    schedule_hours:      document.getElementById("schedule-hours").value,
-    schedule_time:       document.getElementById("schedule-time").value,
-    recent_count:        document.getElementById("recent-count").value,
-    catalog_count:       document.getElementById("catalog-count").value,
-    disk_threshold_pct:  document.getElementById("disk-threshold").value,
+    schedule_mode:          mode,
+    schedule_hours:         document.getElementById("schedule-hours").value,
+    schedule_time:          document.getElementById("schedule-time").value,
+    recent_count:           document.getElementById("recent-count").value,
+    catalog_count:          document.getElementById("catalog-count").value,
+    disk_threshold_pct:     document.getElementById("disk-threshold").value,
+    rebase_missing_action:  document.querySelector('input[name="rebase_missing_action"]:checked')?.value || "download",
   };
   const status = document.getElementById("settings-status");
   try {
@@ -287,6 +311,109 @@ async function pollUntilDone(taskId, card, channelId, maxWait = 300000) {
   }
   setCardBusy(card, false);
 }
+
+/* ── update system ───────────────────────────────────────────────────── */
+let _releases = [];
+
+document.getElementById("btn-check-updates").addEventListener("click", async () => {
+  const btn     = document.getElementById("btn-check-updates");
+  const msg     = document.getElementById("update-status-msg");
+  const area    = document.getElementById("update-release-area");
+  const verBadge = document.getElementById("update-local-version");
+
+  btn.disabled = true;
+  btn.textContent = "Checking…";
+  msg.className = "add-status";
+  msg.textContent = "";
+  area.classList.add("hidden");
+
+  try {
+    const data = await api("/api/updates/status");
+    _releases = data.releases || [];
+
+    verBadge.textContent = data.local_version ? `v${data.local_version}` : "unknown";
+
+    // Populate release dropdown
+    const select = document.getElementById("update-release-select");
+    select.innerHTML = "";
+    _releases.forEach(r => {
+      const opt = document.createElement("option");
+      opt.value       = r.tag;
+      opt.textContent = `${r.tag}${r.is_latest ? " (latest)" : ""} — ${_fmtReleaseDate(r.published_at)}`;
+      select.appendChild(opt);
+    });
+
+    if (_releases.length > 0) {
+      area.style.display = "flex";
+      area.classList.remove("hidden");
+      _updateReleaseNotes();
+    }
+
+    msg.className = data.status === "up_to_date" ? "add-status ok" : "add-status";
+    msg.textContent = data.message;
+
+  } catch (e) {
+    msg.className = "add-status err";
+    msg.textContent = `✗ ${e.message}`;
+  } finally {
+    btn.disabled = false;
+    btn.textContent = "Check for Updates";
+  }
+});
+
+function _fmtReleaseDate(iso) {
+  if (!iso) return "";
+  return new Date(iso).toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" });
+}
+
+function _updateReleaseNotes() {
+  const select = document.getElementById("update-release-select");
+  const notes  = document.getElementById("update-release-notes");
+  const tag    = select.value;
+  const release = _releases.find(r => r.tag === tag);
+  notes.textContent = release?.notes || "No release notes available.";
+}
+
+document.getElementById("update-release-select")
+  .addEventListener("change", _updateReleaseNotes);
+
+document.getElementById("btn-apply-update").addEventListener("click", async () => {
+  const tag = document.getElementById("update-release-select").value;
+  const msg = document.getElementById("update-status-msg");
+  const btn = document.getElementById("btn-apply-update");
+
+  if (!tag) return;
+  if (!confirm(`Apply ${tag}? The app will continue running on the old version until you restart the service.`)) return;
+
+  btn.disabled = true;
+  msg.className = "add-status";
+  msg.textContent = `Downloading and applying ${tag}…`;
+
+  try {
+    await api("/api/updates/apply", { method: "POST", body: { tag } });
+
+    // Poll for result
+    let result = null;
+    for (let i = 0; i < 60; i++) {
+      await sleep(2000);
+      const r = await api("/api/updates/result");
+      if (!r.in_progress) { result = r.result; break; }
+    }
+
+    if (result?.ok) {
+      msg.className = "add-status ok";
+      msg.textContent = result.message;
+    } else {
+      msg.className = "add-status err";
+      msg.textContent = `✗ ${result?.message || "Update failed."}`;
+      btn.disabled = false;
+    }
+  } catch (e) {
+    msg.className = "add-status err";
+    msg.textContent = `✗ ${e.message}`;
+    btn.disabled = false;
+  }
+});
 
 /* ── disk warning banner ─────────────────────────────────────────────── */
 let _diskWarningDismissed = false;

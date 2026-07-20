@@ -17,9 +17,11 @@ from downloader import (
     delete_video_file,
     delete_channel_folder,
     refresh_last_viewed,
+    rebase_channel,
 )
 from disk_space import check_library_space, check_space
 from scheduler import start_scheduler, apply_schedule
+from updater import check_for_updates, apply_update
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 log = logging.getLogger(__name__)
@@ -67,6 +69,79 @@ def videos_page(channel_id):
     if not ch:
         return "Channel not found", 404
     return render_template("videos.html", channel=dict(ch))
+
+
+# ── update API ─────────────────────────────────────────────────────────────────
+
+@app.route("/api/updates/status")
+def update_status():
+    """
+    Check for available updates by querying GitHub releases.
+    Returns local version, release list, and update status.
+    Network call — may be slow. Frontend should call this on demand only.
+    """
+    try:
+        result = check_for_updates()
+        return jsonify(result)
+    except Exception as e:
+        log.exception("Error checking for updates: %s", e)
+        return jsonify({
+            "status":  "offline",
+            "message": f"Update check failed: {e}",
+        }), 500
+
+
+@app.route("/api/updates/apply", methods=["POST"])
+def apply_update_route():
+    """
+    Apply a specific release by tag.
+    Body: { "tag": "v0.2.0" }
+    Blocks if any background tasks are running.
+    """
+    data = request.json or {}
+    tag  = (data.get("tag") or "").strip()
+    if not tag:
+        return jsonify({"error": "tag required"}), 400
+
+    # Block update if downloads or syncs are in progress
+    with _task_lock:
+        active = [k for k, v in _running_tasks.items() if v]
+    if active:
+        return jsonify({
+            "error":   "tasks_running",
+            "message": f"Cannot update while tasks are running: {', '.join(active)}. "
+                       f"Please wait for them to finish.",
+        }), 409
+
+    task_id = "apply_update"
+    if _is_busy(task_id):
+        return jsonify({"error": "already running"}), 409
+
+    # Run in background so the HTTP response can return immediately
+    # Result is stored and retrievable via /api/updates/result
+    _update_result.clear()
+    _bg(task_id, _run_update, tag)
+    return jsonify({"ok": True, "message": f"Applying {tag}…"})
+
+
+_update_result: dict = {}
+
+
+def _run_update(tag: str):
+    """Background wrapper that stores the update result."""
+    result = apply_update(tag)
+    _update_result.update(result)
+    log.info("Update result: %s", result)
+
+
+@app.route("/api/updates/result")
+def update_result():
+    """Poll this after starting an update to get the final result."""
+    busy = _is_busy("apply_update")
+    return jsonify({
+        "in_progress": busy,
+        "result":      _update_result if not busy else None,
+    })
 
 
 # ── disk space API ─────────────────────────────────────────────────────────────
@@ -227,6 +302,26 @@ def remove_video(video_id):
     return jsonify({"ok": True})
 
 
+@app.route("/api/channels/<channel_id>/rebase", methods=["POST"])
+def rebase(channel_id):
+    """
+    Reconcile the DB with the filesystem for a channel.
+    Phase 1: disk → DB (create/update records to match files on disk).
+    Phase 2: DB → disk (handle DB records with no matching file per
+             the user's 'rebase_missing_action' setting).
+    """
+    task_id = f"rebase_{channel_id}"
+    if _is_busy(task_id):
+        return jsonify({"error": "already running"}), 409
+
+    with get_db() as conn:
+        s = {r["key"]: r["value"] for r in conn.execute("SELECT key, value FROM settings").fetchall()}
+    missing_action = s.get("rebase_missing_action", "download")
+
+    _bg(task_id, rebase_channel, channel_id, missing_action)
+    return jsonify({"ok": True, "message": "rebase started"})
+
+
 # ── sync / download API ────────────────────────────────────────────────────────
 
 @app.route("/api/channels/<channel_id>/sync", methods=["POST"])
@@ -327,6 +422,7 @@ def update_settings():
     allowed = {
         "schedule_mode", "schedule_hours", "schedule_time",
         "recent_count", "catalog_count", "disk_threshold_pct",
+        "rebase_missing_action",
     }
     with get_db() as conn:
         for key, value in data.items():

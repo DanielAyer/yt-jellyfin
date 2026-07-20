@@ -60,12 +60,13 @@ def init_db():
             );
 
             INSERT OR IGNORE INTO settings (key, value) VALUES
-                ('schedule_mode',      'manual'),
-                ('schedule_hours',     '6'),
-                ('schedule_time',      '03:00'),
-                ('recent_count',       '5'),
-                ('catalog_count',      '5'),
-                ('disk_threshold_pct', '10');
+                ('schedule_mode',           'manual'),
+                ('schedule_hours',          '6'),
+                ('schedule_time',           '03:00'),
+                ('recent_count',            '5'),
+                ('catalog_count',           '5'),
+                ('disk_threshold_pct',      '10'),
+                ('rebase_missing_action',   'download');
         """)
 
         # Safe column migrations — handles upgrades from earlier schema versions

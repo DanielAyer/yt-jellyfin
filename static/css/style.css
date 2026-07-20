@@ -392,6 +392,34 @@ input[type="time"]::-webkit-calendar-picker-indicator { filter: invert(0.6); }
   padding: 0.5rem 1.25rem;
 }
 
+/* ── update section ──────────────────────────────────────────────────── */
+.update-version-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.82rem;
+}
+.update-version-badge {
+  font-family: var(--mono);
+  font-size: 0.78rem;
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 0.1rem 0.5rem;
+  color: var(--accent);
+}
+.update-release-notes {
+  font-size: 0.72rem;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  max-height: 8rem;
+  overflow-y: auto;
+  background: var(--surface2);
+  border-radius: 4px;
+  padding: 0.5rem 0.65rem;
+  border: 1px solid var(--border);
+}
+
 /* ── field note (settings helper text) ──────────────────────────────── */
 .field-note {
   font-size: 0.72rem;

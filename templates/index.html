@@ -94,6 +94,36 @@
           </label>
           <p class="field-note">Downloads are blocked when free space falls below this threshold. Hard floor: 5%.</p>
         </fieldset>
+        <fieldset class="field-group">
+          <legend class="field-legend">Updates</legend>
+          <div class="update-version-row">
+            <span class="muted">Current version:</span>
+            <span id="update-local-version" class="update-version-badge">—</span>
+          </div>
+          <div style="display:flex;gap:0.5rem;margin-top:0.5rem;">
+            <button id="btn-check-updates" class="btn btn-primary btn-sm" style="flex:1;">Check for Updates</button>
+          </div>
+          <div id="update-release-area" class="hidden" style="margin-top:0.75rem;display:flex;flex-direction:column;gap:0.5rem;">
+            <label class="field-label">Select version to install
+              <select id="update-release-select" class="field-input"></select>
+            </label>
+            <div id="update-release-notes" class="update-release-notes muted"></div>
+            <button id="btn-apply-update" class="btn btn-accent btn-sm">Apply Selected Version</button>
+          </div>
+          <p id="update-status-msg" class="add-status" style="margin-top:0.5rem;"></p>
+        </fieldset>
+        <fieldset class="field-group">
+          <legend class="field-legend">Rebase Behaviour</legend>
+          <p class="field-note" style="margin-bottom:0.5rem">When Rebase finds DB entries with no matching file on disk:</p>
+          <label class="radio-row">
+            <input type="radio" name="rebase_missing_action" value="download" />
+            Download missing files <em style="color:var(--muted);font-style:normal">(default)</em>
+          </label>
+          <label class="radio-row">
+            <input type="radio" name="rebase_missing_action" value="remove" />
+            Remove database entries
+          </label>
+        </fieldset>
         <button id="btn-save-settings" class="btn btn-accent" style="width:100%;margin-top:0.5rem">Save Settings</button>
         <p id="settings-status" class="add-status"></p>
       </div>
@@ -148,6 +178,7 @@
         <div class="card-last-checked muted">Last checked: <span class="last-checked-val">never</span></div>
         <div class="card-actions">
           <button class="btn btn-sm btn-sync">Sync Now</button>
+          <button class="btn btn-sm btn-rebase">Rebase</button>
           <button class="btn btn-sm btn-catalog">Back Catalog…</button>
           <button class="btn btn-sm btn-more-videos">More Videos</button>
         </div>

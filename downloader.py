@@ -29,44 +29,107 @@ def _channel_dir(channel_name: str) -> str:
 
 
 def _safe_title(title: str) -> str:
-    """Sanitize a video title for use as a filename."""
-    # Remove characters that are problematic on Linux/Windows/Mac filesystems
+    """
+    Sanitize a video title for use as a filename stem.
+    Removes filesystem-unsafe characters and collapses whitespace.
+    """
     safe = re.sub(r'[<>:"/\\|?*\x00-\x1f]', "_", title).strip()
-    # Collapse multiple spaces/underscores
     safe = re.sub(r"[ _]{2,}", " ", safe).strip(" _")
     return safe or "untitled"
 
 
-def _fmt_date(upload_date: str) -> str:
-    """Convert YYYYMMDD to YYYY-MM-DD. Returns empty string if invalid."""
-    if upload_date and len(upload_date) == 8:
-        return f"{upload_date[:4]}-{upload_date[4:6]}-{upload_date[6:]}"
+def _fmt_date_iso(upload_date: str) -> str:
+    """
+    Convert yt-dlp YYYYMMDD string to ISO compact format YYYYMMDD
+    suitable for use in filenames: [20260720].
+    Returns empty string if invalid.
+    """
+    if upload_date and len(upload_date) == 8 and upload_date.isdigit():
+        return upload_date  # already YYYYMMDD
     return ""
 
 
-def _output_path(out_dir: str, title: str, upload_date: str, video_id: str) -> str:
+def _output_path(out_dir: str, title: str, upload_date: str) -> str:
     """
-    Determine output filepath using collision-aware naming:
+    Determine output filepath using collision-aware naming convention:
+
       1. Title.mp4
-      2. Title (YYYY-MM-DD).mp4       — if title already exists
-      3. Title (YYYY-MM-DD) [id].mp4  — final fallback
+         — first attempt, no suffix
+
+      2. Title_[YYYYMMDD].mp4  (both the existing and new file get renamed)
+         — triggered when Title.mp4 already exists
+
+      3. Title_[YYYYMMDD]_1.mp4, Title_[YYYYMMDD]_2.mp4, ...
+         — triggered when Title_[YYYYMMDD].mp4 also exists;
+           all files sharing that stem get a counter suffix
+
+    Returns the resolved path for the new file. Any existing files that
+    need renaming are handled by _resolve_collision(), which also updates
+    the DB file_path records.
     """
     safe = _safe_title(title)
-    date  = _fmt_date(upload_date)
+    date = _fmt_date_iso(upload_date)
 
-    candidates = [
-        os.path.join(out_dir, f"{safe}.mp4"),
-        os.path.join(out_dir, f"{safe} ({date}).mp4") if date else None,
-        os.path.join(out_dir, f"{safe} ({date}) [{video_id}].mp4") if date else
-        os.path.join(out_dir, f"{safe} [{video_id}].mp4"),
-    ]
+    base_path = os.path.join(out_dir, f"{safe}.mp4")
 
-    for path in candidates:
-        if path and not os.path.exists(path):
-            return path
+    if not os.path.exists(base_path):
+        # No collision — use clean title
+        return base_path
 
-    # All candidates exist (extremely unlikely) — force unique with full ID
-    return os.path.join(out_dir, f"{safe} [{video_id}].mp4")
+    # Collision on base title — upgrade to dated names
+    if not date:
+        # No date available — fall back to counter on base title
+        return _counter_path(out_dir, safe)
+
+    dated_stem = f"{safe}_[{date}]"
+    dated_path = os.path.join(out_dir, f"{dated_stem}.mp4")
+
+    if not os.path.exists(dated_path):
+        # Rename the existing base file to dated, return dated path for new file
+        _rename_file_in_db(base_path, dated_path)
+        os.rename(base_path, dated_path)
+        return dated_path
+
+    # Collision on dated name too — upgrade all matching files to countered names
+    return _counter_path(out_dir, dated_stem, also_rename=dated_path)
+
+
+def _rename_file_in_db(old_path: str, new_path: str):
+    """Update file_path in the videos table when a file is renamed."""
+    try:
+        with get_db() as conn:
+            conn.execute(
+                "UPDATE videos SET file_path = ? WHERE file_path = ?",
+                (new_path, old_path),
+            )
+    except Exception as e:
+        log.warning("Could not update DB file_path for rename %s → %s: %s", old_path, new_path, e)
+
+
+def _counter_path(out_dir: str, stem: str, also_rename: str | None = None) -> str:
+    """
+    Find the next available counter suffix for a given stem.
+    If also_rename is provided, rename that existing file to stem_1.mp4
+    and update the DB, then return stem_2.mp4 for the new file.
+    """
+    # Find all existing files that start with this stem
+    existing = sorted([
+        f for f in os.listdir(out_dir)
+        if f.startswith(stem) and f.endswith(".mp4")
+    ])
+
+    if also_rename and os.path.exists(also_rename):
+        # Rename the existing dated file to _1
+        new_name = os.path.join(out_dir, f"{stem}_1.mp4")
+        _rename_file_in_db(also_rename, new_name)
+        os.rename(also_rename, new_name)
+        return os.path.join(out_dir, f"{stem}_2.mp4")
+
+    # Just find the next available counter
+    counter = len(existing) + 1
+    while os.path.exists(os.path.join(out_dir, f"{stem}_{counter}.mp4")):
+        counter += 1
+    return os.path.join(out_dir, f"{stem}_{counter}.mp4")
 
 
 def _known_ids(channel_id: str) -> set:
@@ -81,11 +144,9 @@ def _known_ids(channel_id: str) -> set:
 
 def get_last_viewed(file_path: str) -> str | None:
     """
-    Read the file's last-accessed time (atime) from the filesystem.
+    Read the file's last-accessed time (atime/relatime) from the filesystem.
     Returns ISO timestamp string, or None if the file doesn't exist.
-
-    NOTE: Requires the partition to NOT be mounted with 'noatime'.
-    See /api/system/status for the noatime check and user alert.
+    relatime granularity (24h) is sufficient for rebase/sync decisions.
     """
     try:
         atime = os.stat(file_path).st_atime
@@ -121,33 +182,166 @@ def refresh_last_viewed(channel_id: str | None = None):
     log.info("Refreshed last_viewed for %d videos", updated)
 
 
+# ── rebase ─────────────────────────────────────────────────────────────────────
+
+def rebase_channel(channel_id: str, missing_action: str = "download") -> dict:
+    """
+    Reconcile the DB with the filesystem for a channel.
+
+    Phase 1 — filesystem → DB (disk is ground truth):
+      Scan the channel folder. For each .mp4 found:
+        - Match to a DB record by sanitized title stem
+        - If matched: ensure status='downloaded', file_path is current
+        - If no match: create a new 'downloaded' record
+
+    Phase 2 — DB → filesystem:
+      Find all DB records with no matching file on disk.
+      Apply missing_action:
+        'download' — reset to 'pending' (resync will grab them)
+        'remove'   — delete the DB record entirely
+
+    Returns a summary dict.
+    """
+    with get_db() as conn:
+        ch = conn.execute(
+            "SELECT * FROM channels WHERE channel_id = ?", (channel_id,)
+        ).fetchone()
+    if not ch:
+        return {"error": "channel not found"}
+
+    out_dir = _channel_dir(ch["channel_name"])
+
+    # ── Phase 1: scan filesystem ───────────────────────────────────────────────
+
+    # Build a map of sanitized_stem → full_path for all .mp4 files on disk
+    disk_files: dict[str, str] = {}
+    try:
+        for fname in os.listdir(out_dir):
+            if fname.endswith(".mp4"):
+                stem = os.path.splitext(fname)[0]
+                disk_files[stem] = os.path.join(out_dir, fname)
+    except FileNotFoundError:
+        log.warning("Channel folder not found during rebase: %s", out_dir)
+
+    # Build a single query result: all DB records for this channel
+    with get_db() as conn:
+        db_rows = conn.execute(
+            "SELECT video_id, title, upload_date, file_path, status FROM videos WHERE channel_id = ?",
+            (channel_id,)
+        ).fetchall()
+
+    # Build lookup: sanitized_title_stem → db_row
+    # A DB record may match a plain title stem OR a dated/countered variant
+    db_by_stem: dict[str, dict] = {}
+    for row in db_rows:
+        safe = _safe_title(row["title"])
+        db_by_stem[safe] = dict(row)
+
+    confirmed = []
+    new_records = []
+    matched_video_ids = set()
+
+    for stem, full_path in disk_files.items():
+        # Strip date/counter suffixes to get the base title stem for matching
+        # e.g. "My Video_[20260720]_1" → "My Video"
+        base_stem = re.sub(r"_\[\d{8}\](_\d+)?$", "", stem).strip()
+        base_stem = re.sub(r"_\d+$", "", base_stem).strip()
+
+        if base_stem in db_by_stem:
+            row = db_by_stem[base_stem]
+            matched_video_ids.add(row["video_id"])
+            # Update file_path and status if needed
+            if row["file_path"] != full_path or row["status"] != "downloaded":
+                with get_db() as conn:
+                    conn.execute(
+                        """UPDATE videos SET status = 'downloaded', file_path = ?,
+                           downloaded_at = COALESCE(downloaded_at, ?)
+                           WHERE video_id = ?""",
+                        (full_path, datetime.utcnow().isoformat(), row["video_id"]),
+                    )
+            confirmed.append(row["video_id"])
+        else:
+            # File on disk with no DB record — create one
+            # We can't recover the video_id from the filename alone, so we use
+            # the stem as a placeholder title and mark it as downloaded.
+            # A subsequent sync will reconcile full metadata.
+            placeholder_id = f"rebase_{stem[:40]}"
+            with get_db() as conn:
+                conn.execute(
+                    """INSERT OR IGNORE INTO videos
+                       (video_id, channel_id, title, status, file_path, downloaded_at)
+                       VALUES (?, ?, ?, 'downloaded', ?, ?)""",
+                    (placeholder_id, channel_id, stem, full_path, datetime.utcnow().isoformat()),
+                )
+            new_records.append(stem)
+
+    # ── Phase 2: handle DB records with no matching file ───────────────────────
+
+    missing = [dict(r) for r in db_rows if r["video_id"] not in matched_video_ids]
+    missing_handled = []
+
+    for row in missing:
+        if missing_action == "remove":
+            with get_db() as conn:
+                conn.execute("DELETE FROM video_thumbnails WHERE video_id = ?", (row["video_id"],))
+                conn.execute("DELETE FROM videos WHERE video_id = ?", (row["video_id"],))
+        else:
+            # Default: reset to pending so resync will redownload
+            with get_db() as conn:
+                conn.execute(
+                    "UPDATE videos SET status = 'pending', file_path = NULL WHERE video_id = ?",
+                    (row["video_id"],)
+                )
+        missing_handled.append(row["video_id"])
+
+    # Recalculate channel totals
+    with get_db() as conn:
+        downloaded = conn.execute(
+            "SELECT COUNT(*) FROM videos WHERE channel_id = ? AND status = 'downloaded'",
+            (channel_id,)
+        ).fetchone()[0]
+        conn.execute(
+            "UPDATE channels SET total_downloaded = ? WHERE channel_id = ?",
+            (downloaded, channel_id)
+        )
+
+    log.info(
+        "Rebase %s: %d confirmed, %d new records, %d missing (%s)",
+        ch["channel_name"], len(confirmed), len(new_records),
+        len(missing_handled), missing_action
+    )
+
+    return {
+        "confirmed":       len(confirmed),
+        "new_records":     len(new_records),
+        "missing_count":   len(missing_handled),
+        "missing_action":  missing_action,
+        "message": (
+            f"Rebase complete — {len(confirmed)} files confirmed, "
+            f"{len(new_records)} new records created, "
+            f"{len(missing_handled)} missing files "
+            f"{'queued for download' if missing_action == 'download' else 'removed from database'}."
+        )
+    }
+
+
 # ── file deletion ──────────────────────────────────────────────────────────────
 
 def delete_video_file(file_path: str) -> bool:
-    """
-    Delete a single video file and its associated .info.json sidecar if present.
-    Returns True if the file was deleted, False if it didn't exist or failed.
-    """
+    """Delete a single video file. Returns True if deleted."""
     deleted = False
     try:
         if file_path and os.path.isfile(file_path):
             os.remove(file_path)
             log.info("Deleted video file: %s", file_path)
             deleted = True
-        # Remove .info.json sidecar if present
-        info = os.path.splitext(file_path)[0] + ".info.json" if file_path else None
-        if info and os.path.isfile(info):
-            os.remove(info)
     except OSError as e:
         log.warning("Could not delete file %s: %s", file_path, e)
     return deleted
 
 
 def delete_channel_folder(channel_name: str) -> bool:
-    """
-    Delete the entire channel folder and all its contents.
-    Returns True on success.
-    """
+    """Delete the entire channel folder and all its contents."""
     safe = "".join(c if c.isalnum() or c in " _-" else "_" for c in channel_name).strip()
     path = os.path.join(LIBRARY_ROOT, safe)
     try:
@@ -163,7 +357,6 @@ def delete_channel_folder(channel_name: str) -> bool:
 # ── metadata fetch ─────────────────────────────────────────────────────────────
 
 def _videos_url(channel_url: str) -> str:
-    """Ensure we fetch the /videos tab, not the channel root."""
     url = channel_url.rstrip("/")
     if not url.endswith("/videos"):
         url += "/videos"
@@ -171,7 +364,6 @@ def _videos_url(channel_url: str) -> str:
 
 
 def _pick_thumbnail(thumbnails: list) -> str | None:
-    """Pick best thumbnail URL from a yt-dlp thumbnails list."""
     if not thumbnails:
         return None
     for t in thumbnails:
@@ -241,41 +433,36 @@ def download_video(video_id: str, channel_name: str, channel_id: str) -> bool:
     """
     Download a single video using yt-dlp.
 
-    Filename convention (collision-aware):
+    Filename convention (collision-aware, ISO dates):
       1. Title.mp4
-      2. Title (YYYY-MM-DD).mp4
-      3. Title (YYYY-MM-DD) [video_id].mp4
+      2. Title_[YYYYMMDD].mp4        — existing file renamed to match
+      3. Title_[YYYYMMDD]_N.mp4      — counter applied to all colliding files
 
-    Metadata (upload date, channel, description, etc.) is embedded
-    in the MP4 file itself via --embed-metadata.
+    Metadata embedded in MP4 via --embed-metadata.
     """
     out_dir = _channel_dir(channel_name)
     url = f"https://www.youtube.com/watch?v={video_id}"
 
-    # Fetch title and upload_date first so we can determine the output path
-    meta_r = _run_ytdlp(
-        "--dump-single-json",
-        "--no-playlist",
-        url,
-    )
-    title       = video_id   # fallback
+    # Pre-fetch metadata to determine filename before downloading
+    meta_r = _run_ytdlp("--dump-single-json", "--no-playlist", url)
+    title       = video_id
     upload_date = ""
     if meta_r.returncode == 0:
         try:
-            meta = json.loads(meta_r.stdout)
+            meta        = json.loads(meta_r.stdout)
             title       = meta.get("title", video_id)
             upload_date = meta.get("upload_date", "")
         except json.JSONDecodeError:
             pass
 
-    out_path = _output_path(out_dir, title, upload_date, video_id)
+    out_path = _output_path(out_dir, title, upload_date)
 
     r = _run_ytdlp(
         "--format",              "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best",
         "--merge-output-format", "mp4",
         "--output",              out_path,
         "--no-playlist",
-        "--embed-metadata",      # embeds title, date, channel, description into MP4
+        "--embed-metadata",
         "--no-progress",
         url,
         capture=False,
@@ -286,27 +473,23 @@ def download_video(video_id: str, channel_name: str, channel_id: str) -> bool:
         _mark_video(channel_id, video_id, status="failed")
         return False
 
-    # Confirm the file actually exists at the expected path
     if not os.path.isfile(out_path):
-        # yt-dlp may have adjusted the extension — scan the directory
-        out_path = _find_file_by_title(out_dir, title, video_id)
+        out_path = _find_file_by_title(out_dir, title)
 
     _mark_video(channel_id, video_id, status="downloaded", file_path=out_path)
     return True
 
 
-def _find_file_by_title(directory: str, title: str, video_id: str) -> str | None:
-    """Scan directory for a file matching the title or video_id."""
+def _find_file_by_title(directory: str, title: str) -> str | None:
+    """Scan directory for a file whose name starts with the sanitized title."""
     safe = _safe_title(title)
     for f in os.listdir(directory):
-        name = os.path.splitext(f)[0]
-        if name.startswith(safe) or video_id in f:
+        if f.startswith(safe) and f.endswith(".mp4"):
             return os.path.join(directory, f)
     return None
 
 
 def download_videos_by_id(video_ids: list[str], channel_id: str) -> dict:
-    """Download a specific list of video IDs for a channel."""
     with get_db() as conn:
         ch = conn.execute(
             "SELECT * FROM channels WHERE channel_id = ?", (channel_id,)
@@ -368,7 +551,7 @@ def sync_channel(channel_id: str, recent_count: int = 5, catalog_count: int = 5)
                     (v["video_id"], v["thumbnail_url"]),
                 )
         conn.execute(
-            """UPDATE channels SET total_available = ?, last_checked = ? WHERE channel_id = ?""",
+            "UPDATE channels SET total_available = ?, last_checked = ? WHERE channel_id = ?",
             (total_available, datetime.utcnow().isoformat(), channel_id),
         )
 
@@ -381,9 +564,7 @@ def sync_channel(channel_id: str, recent_count: int = 5, catalog_count: int = 5)
         ok = download_video(v["video_id"], ch["channel_name"], channel_id)
         (results["downloaded"] if ok else results["failed"]).append(v["video_id"])
 
-    # Refresh last_viewed for this channel after sync
     refresh_last_viewed(channel_id)
-
     return results
 
 
