@@ -31,7 +31,7 @@ document.querySelectorAll(".mode-btn").forEach(btn => {
 document.getElementById("jellyfin-url").addEventListener("input", (e) => {
   const url  = e.target.value.trim().replace(/\/$/, "");
   const link = document.getElementById("jellyfin-api-link");
-  link.href        = `${url}/web/index.html#!/apikeys.html`;
+  link.href        = `${url}/web/index.html#!/keys.html`;
   link.textContent = "Dashboard → API Keys";
 });
 
