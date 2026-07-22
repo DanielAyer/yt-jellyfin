@@ -1,33 +1,43 @@
 import logging
 import threading
 
-# Validate required config before importing anything that depends on it
-from config import HOST, PORT, validate_config
-validate_config()
+from config import HOST, PORT
+from setup import is_setup_complete
 
-from flask import Flask, jsonify, request, render_template
-from database import init_db, get_db
-from downloader import (
-    resolve_channel_id_and_name,
-    fetch_channel_metadata,
-    sync_channel,
-    download_back_catalog,
-    sync_all_channels,
-    download_videos_by_id,
-    delete_video_file,
-    delete_channel_folder,
-    refresh_last_viewed,
-    rebase_channel,
-)
-from disk_space import check_library_space, check_space
-from scheduler import start_scheduler, apply_schedule
-from updater import check_for_updates, apply_update
+from flask import Flask, jsonify, request, render_template, redirect, url_for
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 log = logging.getLogger(__name__)
 
 app = Flask(__name__)
-init_db()
+
+# ── setup mode ─────────────────────────────────────────────────────────────────
+# If LIBRARY_ROOT / DB_PATH are not configured, the app runs in setup mode.
+# Only the /setup routes are active; all other routes redirect to /setup.
+
+_setup_complete = is_setup_complete()
+
+if _setup_complete:
+    from database import init_db, get_db
+    from downloader import (
+        resolve_channel_id_and_name,
+        fetch_channel_metadata,
+        sync_channel,
+        download_back_catalog,
+        sync_all_channels,
+        download_videos_by_id,
+        delete_video_file,
+        delete_channel_folder,
+        refresh_last_viewed,
+        rebase_channel,
+    )
+    from disk_space import check_library_space, check_space
+    from scheduler import start_scheduler, apply_schedule
+    from updater import check_for_updates, apply_update
+    init_db()
+else:
+    log.warning("App starting in SETUP MODE — LIBRARY_ROOT or DB_PATH not configured.")
+    log.warning("Open http://<server-ip>:%d/setup to configure.", PORT)
 
 # ── background task runner ─────────────────────────────────────────────────────
 
@@ -53,15 +63,67 @@ def _is_busy(task_id: str) -> bool:
         return _running_tasks.get(task_id, False)
 
 
-# ── pages ──────────────────────────────────────────────────────────────────────
+# ── setup routes ───────────────────────────────────────────────────────────────
+
+@app.route("/setup")
+def setup_page():
+    if _setup_complete:
+        return redirect(url_for("index"))
+    return render_template("setup.html")
+
+
+@app.route("/api/setup/jellyfin-libraries", methods=["POST"])
+def setup_jellyfin_libraries():
+    """Query Jellyfin API for library folders using provided URL and API key."""
+    from setup import query_jellyfin_libraries
+    data        = request.json or {}
+    jellyfin_url = (data.get("jellyfin_url") or "").strip()
+    api_key      = (data.get("api_key") or "").strip()
+
+    if not jellyfin_url or not api_key:
+        return jsonify({"error": "jellyfin_url and api_key are required"}), 400
+
+    try:
+        libraries = query_jellyfin_libraries(jellyfin_url, api_key)
+        return jsonify({"ok": True, "libraries": libraries})
+    except ValueError as e:
+        return jsonify({"ok": False, "error": str(e)}), 400
+    except Exception as e:
+        log.exception("Unexpected error querying Jellyfin: %s", e)
+        return jsonify({"ok": False, "error": "Unexpected error — check server logs."}), 500
+
+
+@app.route("/api/setup/save", methods=["POST"])
+def setup_save():
+    """Write configuration to .env and signal the user to restart."""
+    from setup import write_env
+    data = request.json or {}
+
+    result = write_env(
+        library_root     = data.get("library_root", ""),
+        db_path          = data.get("db_path", ""),
+        host             = data.get("host", "0.0.0.0"),
+        port             = data.get("port", "5000"),
+        jellyfin_url     = data.get("jellyfin_url", ""),
+        jellyfin_api_key = data.get("jellyfin_api_key", ""),
+    )
+    status_code = 200 if result["ok"] else 400
+    return jsonify(result), status_code
+
+
+# ── pages ───────────────────────────────────────────────────────────────────────
 
 @app.route("/")
 def index():
+    if not _setup_complete:
+        return redirect(url_for("setup_page"))
     return render_template("index.html")
 
 
 @app.route("/channel/<channel_id>/videos")
 def videos_page(channel_id):
+    if not _setup_complete:
+        return redirect(url_for("setup_page"))
     with get_db() as conn:
         ch = conn.execute(
             "SELECT * FROM channels WHERE channel_id = ?", (channel_id,)
@@ -467,7 +529,7 @@ def list_videos(channel_id):
 
 
 if __name__ == "__main__":
-    # Refresh last_viewed from filesystem on boot
-    _bg("boot_last_viewed", refresh_last_viewed)
-    start_scheduler()
+    if _setup_complete:
+        _bg("boot_last_viewed", refresh_last_viewed)
+        start_scheduler()
     app.run(host=HOST, port=PORT, debug=False)
