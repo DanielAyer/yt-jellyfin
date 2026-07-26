@@ -1,6 +1,13 @@
-/* setup.js — first-run configuration wizard */
+/*
+ * setup.js — first-run configuration wizard
+ *
+ * Jellyfin URL resolution order:
+ *   1. JELLYFIN_URL from server config (/api/setup/config-defaults)
+ *   2. window.location.hostname:8096 (works for cohabitating installs)
+ *   3. User prompted to set JELLYFIN_URL manually if connection fails
+ */
 
-let _mode = "jellyfin"; // "jellyfin" | "manual"
+let _mode     = "jellyfin";
 let _libraries = [];
 
 /* ── API helper ──────────────────────────────────────────────────────── */
@@ -16,6 +23,50 @@ async function api(path, { method = "GET", body } = {}) {
   return data;
 }
 
+/* ── init — load config defaults and pre-populate fields ─────────────── */
+async function init() {
+  try {
+    const defaults = await api("/api/setup/config-defaults");
+
+    // Jellyfin URL: config var → hostname fallback → blank
+    const jellyfinUrl = defaults.jellyfin_url
+      || `http://${window.location.hostname}:8096`;
+
+    const urlInput = document.getElementById("jellyfin-url");
+    urlInput.value = jellyfinUrl;
+    _updateApiKeyLink(jellyfinUrl);
+
+    if (defaults.jellyfin_api_key) {
+      document.getElementById("jellyfin-api-key").value = defaults.jellyfin_api_key;
+    }
+
+    // Manual fields
+    if (defaults.library_root) {
+      document.getElementById("manual-library-root").value = defaults.library_root;
+      _updateDbLabel(defaults.library_root);
+    }
+    if (defaults.db_path) {
+      document.getElementById("manual-db-auto").checked = false;
+      const dbInput = document.getElementById("manual-db-path");
+      dbInput.value = defaults.db_path;
+      dbInput.classList.remove("hidden");
+    }
+  } catch (_) {
+    // Non-fatal — just leave fields blank
+  }
+}
+
+/* ── Jellyfin URL → live API key link ────────────────────────────────── */
+function _updateApiKeyLink(url) {
+  const clean = url.trim().replace(/\/$/, "");
+  const link  = document.getElementById("jellyfin-api-link");
+  link.href   = `${clean}/web/index.html#/dashboard/keys`;
+}
+
+document.getElementById("jellyfin-url").addEventListener("input", (e) => {
+  _updateApiKeyLink(e.target.value);
+});
+
 /* ── mode toggle ─────────────────────────────────────────────────────── */
 document.querySelectorAll(".mode-btn").forEach(btn => {
   btn.addEventListener("click", () => {
@@ -25,14 +76,6 @@ document.querySelectorAll(".mode-btn").forEach(btn => {
     document.getElementById("path-jellyfin").classList.toggle("hidden", _mode !== "jellyfin");
     document.getElementById("path-manual").classList.toggle("hidden",   _mode !== "manual");
   });
-});
-
-/* ── Jellyfin URL → live API key link ────────────────────────────────── */
-document.getElementById("jellyfin-url").addEventListener("input", (e) => {
-  const url  = e.target.value.trim().replace(/\/$/, "");
-  const link = document.getElementById("jellyfin-api-link");
-  link.href        = `${url}/web/index.html#!/keys.html`;
-  link.textContent = "Dashboard → API Keys";
 });
 
 /* ── connect to Jellyfin ─────────────────────────────────────────────── */
@@ -73,30 +116,80 @@ document.getElementById("btn-fetch-libraries").addEventListener("click", async (
     _libraries.forEach(lib => {
       const opt = document.createElement("option");
       opt.value       = lib.path;
-      opt.textContent = `${lib.name} — ${lib.path} (${lib.type})`;
+      opt.textContent = `${lib.name} — ${lib.path}`;
       select.appendChild(opt);
     });
 
-    document.getElementById("step-library-select").style.display = "flex";
+    document.getElementById("step-library-select").classList.remove("hidden");
+    _updateYoutubeFolderOptions();
+
     status.className = "add-status ok";
     status.textContent = `✓ Connected — ${_libraries.length} library folder(s) found.`;
 
   } catch (e) {
     status.className = "add-status err";
-    status.textContent = `✗ ${e.message}`;
+    // If connection failed, hint about JELLYFIN_URL config var
+    const hint = e.message.includes("Could not reach")
+      ? `\nIf Jellyfin is on a different machine, update the URL above or set JELLYFIN_URL in your .env file.`
+      : "";
+    status.textContent = `✗ ${e.message}${hint}`;
   } finally {
     btn.disabled = false;
     btn.textContent = "Connect to Jellyfin";
   }
 });
 
+/* ── YouTube folder options ──────────────────────────────────────────── */
+document.getElementById("jellyfin-library-select")
+  .addEventListener("change", _updateYoutubeFolderOptions);
+
+function _updateYoutubeFolderOptions() {
+  const select  = document.getElementById("jellyfin-library-select");
+  const lib     = _libraries.find(l => l.path === select.value);
+  if (!lib) return;
+
+  const existingLabel = document.querySelector("#yt-existing-label code");
+  const existingRadio = document.getElementById("yt-use-existing");
+  const createRadio   = document.getElementById("yt-create-new");
+
+  if (lib.youtube_exists) {
+    // Existing youtube folder found — default to using it
+    existingLabel.textContent = lib.youtube_path;
+    existingRadio.disabled    = false;
+    existingRadio.checked     = true;
+  } else {
+    // No youtube folder — default to creating one
+    existingLabel.textContent = "none found";
+    existingRadio.disabled    = true;
+    createRadio.checked       = true;
+  }
+}
+
+function _resolveLibraryRoot() {
+  const select = document.getElementById("jellyfin-library-select");
+  const lib    = _libraries.find(l => l.path === select.value);
+  if (!lib) return "";
+
+  const choice = document.querySelector('input[name="yt_folder"]:checked')?.value;
+
+  if (choice === "existing") return lib.youtube_path;
+  if (choice === "create")   return lib.path.replace(/\/$/, "") + "/youtube";
+  if (choice === "custom")   return lib.path;
+  return lib.path;
+}
+
 /* ── manual DB path auto-fill ────────────────────────────────────────── */
+function _updateDbLabel(root) {
+  const clean = root.trim().replace(/\/$/, "");
+  document.getElementById("manual-db-default-label").textContent =
+    clean ? `${clean}/.ytjf.db` : "LIBRARY_ROOT/.ytjf.db";
+}
+
 document.getElementById("manual-library-root").addEventListener("input", (e) => {
-  const root  = e.target.value.trim().replace(/\/$/, "");
-  const label = document.getElementById("manual-db-default-label");
-  label.textContent = root ? `${root}/.ytjf.db` : "LIBRARY_ROOT/.ytjf.db";
+  _updateDbLabel(e.target.value);
   if (document.getElementById("manual-db-auto").checked) {
-    document.getElementById("manual-db-path").value = root ? `${root}/.ytjf.db` : "";
+    const clean = e.target.value.trim().replace(/\/$/, "");
+    document.getElementById("manual-db-path").value = clean ? `${clean}/.ytjf.db` : "";
   }
 });
 
@@ -116,16 +209,16 @@ document.getElementById("btn-save-setup").addEventListener("click", async () => 
   const btn    = document.getElementById("btn-save-setup");
   const result = document.getElementById("setup-result");
 
-  let library_root = "";
-  let db_path      = "";
-  let jellyfin_url = "";
+  let library_root     = "";
+  let db_path          = "";
+  let jellyfin_url     = "";
   let jellyfin_api_key = "";
 
   if (_mode === "jellyfin") {
-    const select = document.getElementById("jellyfin-library-select");
-    library_root     = select.value;
+    library_root     = _resolveLibraryRoot();
     jellyfin_url     = document.getElementById("jellyfin-url").value.trim();
     jellyfin_api_key = document.getElementById("jellyfin-api-key").value.trim();
+
     if (!library_root) {
       result.className = "setup-result err";
       result.textContent = "Please connect to Jellyfin and select a library folder.";
@@ -138,6 +231,7 @@ document.getElementById("btn-save-setup").addEventListener("click", async () => 
     db_path = autoDb
       ? `${library_root.replace(/\/$/, "")}/.ytjf.db`
       : document.getElementById("manual-db-path").value.trim();
+
     if (!library_root) {
       result.className = "setup-result err";
       result.textContent = "Please enter a library root folder.";
@@ -158,14 +252,7 @@ document.getElementById("btn-save-setup").addEventListener("click", async () => 
   try {
     const data = await api("/api/setup/save", {
       method: "POST",
-      body: {
-        library_root,
-        db_path,
-        host:             document.getElementById("adv-host").value.trim() || "0.0.0.0",
-        port:             document.getElementById("adv-port").value.trim() || "5000",
-        jellyfin_url,
-        jellyfin_api_key,
-      },
+      body: { library_root, db_path, jellyfin_url, jellyfin_api_key },
     });
 
     result.className = "setup-result ok";
@@ -180,3 +267,6 @@ document.getElementById("btn-save-setup").addEventListener("click", async () => 
     btn.textContent = "Save Configuration";
   }
 });
+
+/* ── init ────────────────────────────────────────────────────────────── */
+init();

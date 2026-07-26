@@ -72,6 +72,16 @@ def setup_page():
     return render_template("setup.html")
 
 
+@app.route("/api/setup/config-defaults")
+def setup_config_defaults():
+    """
+    Return any pre-configured values from the environment that the
+    setup wizard can use as defaults (e.g. JELLYFIN_URL from .env).
+    """
+    from setup import get_config_defaults
+    return jsonify(get_config_defaults())
+
+
 @app.route("/api/setup/jellyfin-libraries", methods=["POST"])
 def setup_jellyfin_libraries():
     """Query Jellyfin API for library folders using provided URL and API key."""
@@ -102,8 +112,6 @@ def setup_save():
     result = write_env(
         library_root     = data.get("library_root", ""),
         db_path          = data.get("db_path", ""),
-        host             = data.get("host", "0.0.0.0"),
-        port             = data.get("port", "5000"),
         jellyfin_url     = data.get("jellyfin_url", ""),
         jellyfin_api_key = data.get("jellyfin_api_key", ""),
     )

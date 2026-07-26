@@ -5,14 +5,19 @@ Handles:
 - Detecting whether the app needs first-run configuration
 - Querying the Jellyfin API to discover library folders
 - Writing the .env file with user-provided configuration
-- Validating paths before saving
+- Validating and creating paths before saving
 
 Two configuration paths are supported:
   A) Import from Jellyfin — queries Jellyfin's local API for library folders
   B) Manual             — user types paths directly
 
 The Jellyfin API key can be found at:
-  <jellyfin-url>/web/index.html#!/apikeys.html
+  <jellyfin-url>/web/index.html#/dashboard/keys
+
+Jellyfin URL resolution order:
+  1. JELLYFIN_URL set in .env or environment
+  2. window.location.hostname:8096 (JS fallback, works for cohabitating installs)
+  3. User prompted to set JELLYFIN_URL manually if connection fails
 """
 import os
 import logging
@@ -22,7 +27,6 @@ import json
 
 log = logging.getLogger(__name__)
 
-# The working directory of the app — where .env lives
 INSTALL_DIR = os.path.dirname(os.path.abspath(__file__))
 ENV_PATH    = os.path.join(INSTALL_DIR, ".env")
 
@@ -39,19 +43,40 @@ def is_setup_complete() -> bool:
     return bool(library_root and db_path and os.path.isdir(library_root))
 
 
+def get_config_defaults() -> dict:
+    """
+    Return any pre-configured values from the environment that the
+    setup wizard can use as defaults. All values are optional.
+    """
+    return {
+        "jellyfin_url":     os.environ.get("JELLYFIN_URL", "").strip(),
+        "jellyfin_api_key": os.environ.get("JELLYFIN_API_KEY", "").strip(),
+        "library_root":     os.environ.get("LIBRARY_ROOT", "").strip(),
+        "db_path":          os.environ.get("DB_PATH", "").strip(),
+    }
+
+
 # ── Jellyfin API ───────────────────────────────────────────────────────────────
 
 def query_jellyfin_libraries(jellyfin_url: str, api_key: str) -> list[dict]:
     """
     Query the Jellyfin API for configured media library folders.
 
-    Returns a list of dicts:
-        { name, path, type }
+    For each library location, checks for an existing 'youtube' subfolder.
 
-    Returns empty list on any error — caller handles messaging.
+    Returns a list of dicts:
+        {
+            name:           str,
+            path:           str,
+            type:           str,
+            youtube_exists: bool,
+            youtube_path:   str | None,
+        }
+
+    Raises ValueError with a user-friendly message on any error.
 
     Jellyfin API key location:
-        <jellyfin_url>/web/index.html#!/apikeys.html
+        <jellyfin_url>/web/index.html#/dashboard/keys
     """
     url = jellyfin_url.rstrip("/") + "/Library/VirtualFolders"
     headers = {
@@ -68,7 +93,11 @@ def query_jellyfin_libraries(jellyfin_url: str, api_key: str) -> list[dict]:
             raise ValueError("Invalid API key — check your Jellyfin API key and try again.")
         raise ValueError(f"Jellyfin returned HTTP {e.code}. Is the URL correct?")
     except urllib.error.URLError as e:
-        raise ValueError(f"Could not reach Jellyfin at {jellyfin_url}. Check the URL and that Jellyfin is running.")
+        raise ValueError(
+            f"Could not reach Jellyfin at {jellyfin_url}. "
+            f"Check the URL and that Jellyfin is running. "
+            f"If Jellyfin is on a different machine, set JELLYFIN_URL in your .env file."
+        )
     except Exception as e:
         raise ValueError(f"Unexpected error querying Jellyfin: {e}")
 
@@ -78,10 +107,22 @@ def query_jellyfin_libraries(jellyfin_url: str, api_key: str) -> list[dict]:
         lib_type  = folder.get("CollectionType", "unknown")
         locations = folder.get("Locations", [])
         for path in locations:
+            # Check for existing youtube subfolder (case-insensitive)
+            youtube_path = None
+            try:
+                for entry in os.listdir(path):
+                    if entry.lower() == "youtube" and os.path.isdir(os.path.join(path, entry)):
+                        youtube_path = os.path.join(path, entry)
+                        break
+            except OSError:
+                pass
+
             libraries.append({
-                "name":  name,
-                "path":  path,
-                "type":  lib_type,
+                "name":           name,
+                "path":           path,
+                "type":           lib_type,
+                "youtube_exists": youtube_path is not None,
+                "youtube_path":   youtube_path,
             })
 
     return libraries
@@ -90,29 +131,33 @@ def query_jellyfin_libraries(jellyfin_url: str, api_key: str) -> list[dict]:
 # ── .env writer ────────────────────────────────────────────────────────────────
 
 def write_env(library_root: str, db_path: str,
-              host: str = "0.0.0.0", port: str = "5000",
-              jellyfin_url: str = "", jellyfin_api_key: str = "") -> dict:
+              jellyfin_url: str = "",
+              jellyfin_api_key: str = "") -> dict:
     """
-    Validate and write configuration to .env.
-
+    Validate, create if needed, and write configuration to .env.
     Returns { ok, message, error }.
     """
     library_root = library_root.strip()
     db_path      = db_path.strip()
 
-    # Validate
     if not library_root:
         return {"ok": False, "error": "LIBRARY_ROOT is required."}
     if not db_path:
         return {"ok": False, "error": "DB_PATH is required."}
-    if not os.path.isdir(library_root):
-        return {
-            "ok":    False,
-            "error": f"LIBRARY_ROOT does not exist or is not a directory: {library_root}\n"
-                     f"Check that the path is correct and the drive is mounted.",
-        }
 
-    # Ensure DB parent directory exists (app will create the file itself)
+    # Create LIBRARY_ROOT if it doesn't exist
+    if not os.path.isdir(library_root):
+        try:
+            os.makedirs(library_root, exist_ok=True)
+            log.info("Created LIBRARY_ROOT: %s", library_root)
+        except OSError as e:
+            return {
+                "ok":    False,
+                "error": f"Could not create LIBRARY_ROOT {library_root}: {e}\n"
+                         f"Check that the parent directory exists and is writable.",
+            }
+
+    # Ensure DB parent directory exists
     db_dir = os.path.dirname(db_path)
     if db_dir and not os.path.isdir(db_dir):
         try:
@@ -127,11 +172,9 @@ def write_env(library_root: str, db_path: str,
         "",
         f"LIBRARY_ROOT={library_root}",
         f"DB_PATH={db_path}",
-        f"HOST={host or '0.0.0.0'}",
-        f"PORT={port or '5000'}",
     ]
     if jellyfin_url:
-        lines += ["", f"JELLYFIN_URL={jellyfin_url}"]
+        lines += ["", f"# Jellyfin integration", f"JELLYFIN_URL={jellyfin_url}"]
     if jellyfin_api_key:
         lines += [f"JELLYFIN_API_KEY={jellyfin_api_key}"]
 
@@ -142,11 +185,13 @@ def write_env(library_root: str, db_path: str,
     except OSError as e:
         return {"ok": False, "error": f"Could not write .env file: {e}"}
 
-    # Apply to current process environment so the app picks it up
+    # Apply to current process so config is immediately available
     os.environ["LIBRARY_ROOT"] = library_root
     os.environ["DB_PATH"]      = db_path
-    os.environ["HOST"]         = host or "0.0.0.0"
-    os.environ["PORT"]         = port or "5000"
+    if jellyfin_url:
+        os.environ["JELLYFIN_URL"] = jellyfin_url
+    if jellyfin_api_key:
+        os.environ["JELLYFIN_API_KEY"] = jellyfin_api_key
 
     return {
         "ok":      True,

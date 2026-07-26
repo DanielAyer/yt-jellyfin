@@ -13,25 +13,21 @@
   <div class="setup-wrap">
 
     <div class="setup-header">
-      <div class="logo">
+      <div class="logo" style="justify-content:center">
         <span class="logo-mark">▶</span>
         <span class="logo-text">YT <em>→</em> Jellyfin</span>
       </div>
       <h1 class="setup-title">First-Run Setup</h1>
       <p class="setup-subtitle muted">
         yt-jellyfin needs to know where your media library lives.
-        You can import this automatically from Jellyfin, or configure it manually.
+        Import automatically from Jellyfin, or configure manually.
       </p>
     </div>
 
     <!-- ── MODE TOGGLE ──────────────────────────────────────────────── -->
     <div class="setup-mode-toggle">
-      <button class="mode-btn active" id="btn-mode-jellyfin" data-mode="jellyfin">
-        Import from Jellyfin
-      </button>
-      <button class="mode-btn" id="btn-mode-manual" data-mode="manual">
-        Manual Configuration
-      </button>
+      <button class="mode-btn active" data-mode="jellyfin">Import from Jellyfin</button>
+      <button class="mode-btn" data-mode="manual">Manual Configuration</button>
     </div>
 
     <!-- ── JELLYFIN PATH ─────────────────────────────────────────────── -->
@@ -40,27 +36,30 @@
       <div class="setup-step">
         <div class="step-num">1</div>
         <div class="step-body">
-          <h3 class="step-title">Enter your Jellyfin URL</h3>
-          <p class="muted step-desc">The address Jellyfin is running on. Usually this is the same machine.</p>
+          <h3 class="step-title">Jellyfin server URL</h3>
+          <p class="muted step-desc">
+            The address your Jellyfin server is running on.
+            If Jellyfin is on a different machine, enter its IP or hostname.
+            You can also set <code>JELLYFIN_URL</code> in your <code>.env</code> file.
+          </p>
           <input type="text" id="jellyfin-url" class="field-input"
-                 placeholder="http://localhost:8096" value="http://localhost:8096" />
+                 placeholder="http://your-jellyfin-host:8096" />
         </div>
       </div>
 
       <div class="setup-step">
         <div class="step-num">2</div>
         <div class="step-body">
-          <h3 class="step-title">Get your Jellyfin API key</h3>
+          <h3 class="step-title">Jellyfin API key</h3>
           <p class="muted step-desc">
             In Jellyfin, go to
-            <a id="jellyfin-api-link" href="http://localhost:8096/web/index.html#!/keys.html"
-               target="_blank" rel="noopener">
+            <a id="jellyfin-api-link" href="#" target="_blank" rel="noopener">
               Dashboard → API Keys
             </a>
-            and create a new key for yt-jellyfin.
+            and create a new key for yt-jellyfin. Paste it below.
           </p>
           <input type="text" id="jellyfin-api-key" class="field-input"
-                 placeholder="Paste your API key here" />
+                 placeholder="Paste your Jellyfin API key here" />
           <button id="btn-fetch-libraries" class="btn btn-primary" style="margin-top:0.5rem">
             Connect to Jellyfin
           </button>
@@ -68,16 +67,28 @@
         </div>
       </div>
 
-      <div class="setup-step" id="step-library-select" style="display:none">
+      <div class="setup-step hidden" id="step-library-select">
         <div class="step-num">3</div>
         <div class="step-body">
-          <h3 class="step-title">Select your YouTube library folder</h3>
-          <p class="muted step-desc">Choose the Jellyfin library where YouTube content should be stored.</p>
+          <h3 class="step-title">Select library folder</h3>
+          <p class="muted step-desc">Choose which Jellyfin library to use for YouTube content.</p>
           <select id="jellyfin-library-select" class="field-input"></select>
-          <p class="field-note" style="margin-top:0.35rem">
-            The selected folder will be used as <code>LIBRARY_ROOT</code>.
-            The database will be stored at <code>LIBRARY_ROOT/.ytjf.db</code>.
-          </p>
+
+          <div id="youtube-folder-options" style="margin-top:0.75rem;display:flex;flex-direction:column;gap:0.4rem;">
+            <p class="muted" style="font-size:0.78rem;font-family:var(--mono);margin-bottom:0.25rem;">YouTube subfolder:</p>
+            <label class="radio-row">
+              <input type="radio" name="yt_folder" value="existing" id="yt-use-existing" />
+              <span id="yt-existing-label">Use existing <code></code></span>
+            </label>
+            <label class="radio-row">
+              <input type="radio" name="yt_folder" value="create" id="yt-create-new" />
+              Create new <code>youtube/</code> subfolder
+            </label>
+            <label class="radio-row">
+              <input type="radio" name="yt_folder" value="custom" id="yt-custom" />
+              Use selected library folder directly
+            </label>
+          </div>
         </div>
       </div>
 
@@ -91,9 +102,9 @@
         <div class="step-body">
           <h3 class="step-title">Library root folder</h3>
           <p class="muted step-desc">
-            The folder where downloaded videos will be stored, organized as
+            Where downloaded videos will be stored, organized as
             <code>LIBRARY_ROOT/ChannelName/video.mp4</code>.
-            Must already exist on disk.
+            The folder will be created if it doesn't exist.
           </p>
           <input type="text" id="manual-library-root" class="field-input"
                  placeholder="/mnt/your-drive/youtube" />
@@ -105,8 +116,8 @@
         <div class="step-body">
           <h3 class="step-title">Database path</h3>
           <p class="muted step-desc">
-            Where the app's SQLite database file should live.
-            Keeping it inside your library folder means it travels with the drive.
+            Where the SQLite database file will live. Keeping it inside
+            your library folder means it travels with the drive.
           </p>
           <label class="radio-row" style="margin-bottom:0.5rem">
             <input type="checkbox" id="manual-db-auto" checked />
@@ -119,24 +130,11 @@
 
     </div>
 
-    <!-- ── ADVANCED (both paths) ─────────────────────────────────────── -->
-    <details class="setup-advanced">
-      <summary>Advanced options</summary>
-      <div class="setup-advanced-body">
-        <label class="field-label">
-          Host (interface to bind to)
-          <input type="text" id="adv-host" class="field-input" value="0.0.0.0" />
-        </label>
-        <label class="field-label">
-          Port
-          <input type="number" id="adv-port" class="field-input" value="5000" min="1024" max="65535" />
-        </label>
-      </div>
-    </details>
-
     <!-- ── SAVE ──────────────────────────────────────────────────────── -->
     <div class="setup-footer">
-      <button id="btn-save-setup" class="btn btn-accent" style="width:100%">Save Configuration</button>
+      <button id="btn-save-setup" class="btn btn-accent" style="width:100%">
+        Save Configuration
+      </button>
       <div id="setup-result" class="setup-result hidden"></div>
     </div>
 
