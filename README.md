@@ -18,14 +18,40 @@ Add a channel, set a sync schedule (or trigger it manually), and new uploads lan
 - **Channel & video thumbnails** — pulled automatically from YouTube on add/sync
 - **Runs as a systemd service** — survives reboots, auto-restarts on failure
 
+---
+
+## Screenshot
+
+*(add a screenshot of the dashboard here once you have one)*
+
+---
 
 ## Requirements
 
-- Linux (tested on Ubuntu 22.04+)
+- Linux (tested on Ubuntu 22.04+ and Debian)
 - Python 3.11+
-- [`yt-dlp`](https://github.com/yt-dlp/yt-dlp) installed and on `PATH`
+- `yt-dlp` — **do not install via `apt`** (see below)
 - An existing [Jellyfin](https://jellyfin.org/) server with a library you control
 - A folder where downloaded videos will live (ideally on the same drive/volume as your Jellyfin library)
+
+### Installing yt-dlp
+
+The version of `yt-dlp` in `apt` / `apt-get` is frequently months out of date and will fail with HTTP 400 errors from YouTube's API. Always install directly from the yt-dlp GitHub releases:
+
+```bash
+sudo curl -L https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp \
+  -o /usr/local/bin/yt-dlp
+sudo chmod a+rx /usr/local/bin/yt-dlp
+yt-dlp --version
+```
+
+To update later:
+```bash
+sudo curl -L https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp \
+  -o /usr/local/bin/yt-dlp
+```
+
+If you previously installed via `apt`, the version at `/usr/local/bin/yt-dlp` will take priority. You can verify which one is being used with `which yt-dlp`.
 
 ---
 
@@ -63,6 +89,8 @@ DB_PATH=/path/to/your/library/.ytjf.db
 ```
 
 `LIBRARY_ROOT` is the folder Jellyfin's library will point at. `DB_PATH` is where the app's SQLite database lives — keeping it inside `LIBRARY_ROOT` means it travels with the drive if you ever move it.
+
+No database setup is required. SQLite needs no separate server or installation step — the app creates the `.db` file and all its tables automatically on first startup, including the parent folder if it doesn't exist yet. `DB_PATH` just needs to point to where you *want* that file to live.
 
 The app validates this configuration on startup and will refuse to run with a clear error message if either variable is missing or if `LIBRARY_ROOT` doesn't exist (e.g. an unmounted drive).
 
