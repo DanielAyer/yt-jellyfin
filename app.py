@@ -141,6 +141,73 @@ def videos_page(channel_id):
     return render_template("videos.html", channel=dict(ch))
 
 
+@app.route("/logs")
+def logs_page():
+    if not _setup_complete:
+        return redirect(url_for("setup_page"))
+    return render_template("logs.html")
+
+
+# ── log API ────────────────────────────────────────────────────────────────────
+
+@app.route("/api/logs")
+def get_logs():
+    """
+    Return the last N lines from the systemd journal for this service.
+    Requires the service user to be in the systemd-journal group.
+    """
+    lines = int(request.args.get("lines", 200))
+    lines = min(lines, 1000)
+    try:
+        import subprocess
+        r = subprocess.run(
+            ["journalctl", "-u", "yt-jellyfin", f"-n{lines}", "--no-pager", "--output=short"],
+            capture_output=True, text=True, timeout=10,
+        )
+        if r.returncode != 0:
+            return jsonify({
+                "lines": [],
+                "error": (
+                    "Could not read journal. Make sure the service user is in the "
+                    "systemd-journal group: sudo usermod -aG systemd-journal <user>"
+                ),
+            }), 500
+        log_lines = [l for l in r.stdout.splitlines() if l.strip()]
+        return jsonify({"lines": log_lines, "count": len(log_lines)})
+    except FileNotFoundError:
+        return jsonify({"lines": [], "error": "journalctl not found — is this a systemd system?"}), 500
+    except Exception as e:
+        log.exception("Error reading journal: %s", e)
+        return jsonify({"lines": [], "error": str(e)}), 500
+
+
+@app.route("/api/logs/stream")
+def stream_logs():
+    """
+    SSE endpoint that tails the systemd journal live.
+    Connect with: EventSource('/api/logs/stream')
+    Each new journal line is pushed as a plain 'data:' SSE event.
+    """
+    import subprocess
+
+    def generate():
+        try:
+            proc = subprocess.Popen(
+                ["journalctl", "-u", "yt-jellyfin", "-f", "--no-pager", "--output=short"],
+                stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True,
+            )
+            for line in proc.stdout:
+                line = line.rstrip()
+                if line:
+                    yield f"data: {line}\n\n"
+        except Exception as e:
+            yield f"data: [stream error: {e}]\n\n"
+
+    from flask import Response
+    return Response(generate(), mimetype="text/event-stream",
+                    headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+
+
 # ── update API ─────────────────────────────────────────────────────────────────
 
 @app.route("/api/updates/status")
