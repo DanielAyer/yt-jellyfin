@@ -233,7 +233,9 @@ def list_channels():
                        WHERE v.channel_id = c.channel_id AND v.status = 'downloaded'
                          AND (v.archived IS NULL OR v.archived = 0)) as downloaded_count,
                       (SELECT COUNT(*) FROM videos v
-                       WHERE v.channel_id = c.channel_id AND v.status = 'pending') as pending_count
+                       WHERE v.channel_id = c.channel_id AND v.status = 'pending') as pending_count,
+                      (SELECT COUNT(*) FROM videos v
+                       WHERE v.channel_id = c.channel_id AND v.status = 'failed') as failed_count
                FROM channels c ORDER BY c.channel_name"""
         ).fetchall()
     channels = [dict(r) for r in rows]

@@ -469,12 +469,23 @@ def download_video(video_id: str, channel_name: str, channel_id: str) -> bool:
     )
 
     if hasattr(r, "returncode") and r.returncode != 0:
-        log.warning("Download failed for %s", video_id)
+        log.warning("Download failed for %s (yt-dlp exit code %s)", video_id, r.returncode)
         _mark_video(channel_id, video_id, status="failed")
         return False
 
+    # Verify the file actually exists — yt-dlp can exit 0 without producing a file
+    # (e.g. outdated version, misconfiguration, unavailable video)
     if not os.path.isfile(out_path):
         out_path = _find_file_by_title(out_dir, title)
+
+    if not out_path:
+        log.error(
+            "Download reported success but no file found for %s (%s). "
+            "Check yt-dlp version and that the video is publicly available.",
+            video_id, title,
+        )
+        _mark_video(channel_id, video_id, status="failed")
+        return False
 
     _mark_video(channel_id, video_id, status="downloaded", file_path=out_path)
     return True

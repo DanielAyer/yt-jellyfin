@@ -223,6 +223,7 @@ a:hover { text-decoration: underline; }
 .stat-val { display: block; font-family: var(--mono); font-size: 1.05rem; font-weight: 600; }
 .stat-label { font-size: 0.62rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; }
 .stat-downloaded { color: var(--accent); }
+.stat-failed     { color: var(--danger); }
 .card-last-checked { font-size: 0.7rem; }
 .card-actions { display: flex; gap: 0.4rem; flex-wrap: wrap; }
 .card-busy {

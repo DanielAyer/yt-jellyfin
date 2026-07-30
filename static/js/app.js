@@ -61,9 +61,15 @@ function buildCard(ch) {
 }
 
 function updateCardStats(card, ch) {
-  card.querySelector(".stat-available").textContent  = ch.total_available ?? "—";
-  card.querySelector(".stat-downloaded").textContent = ch.downloaded_count ?? ch.total_downloaded ?? "—";
+  card.querySelector(".stat-available").textContent       = ch.total_available ?? "—";
+  card.querySelector(".stat-downloaded").textContent      = ch.downloaded_count ?? ch.total_downloaded ?? "—";
   card.querySelector(".stat-available-count").textContent = ch.pending_count ?? "—";
+  const failedEl = card.querySelector(".stat-failed");
+  if (failedEl) {
+    const failed = ch.failed_count ?? 0;
+    failedEl.textContent = failed;
+    failedEl.style.color = failed > 0 ? "var(--danger)" : "";
+  }
   card.querySelector(".last-checked-val").textContent = fmtDate(ch.last_checked);
 }
 
