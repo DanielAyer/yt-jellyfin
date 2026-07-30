@@ -121,7 +121,7 @@ document.getElementById("btn-fetch-libraries").addEventListener("click", async (
     });
 
     document.getElementById("step-library-select").classList.remove("hidden");
-    _updateYoutubeFolderOptions();
+    _updateYoutubeFolderOptions(true);
 
     status.className = "add-status ok";
     status.textContent = `✓ Connected — ${_libraries.length} library folder(s) found.`;
@@ -140,10 +140,16 @@ document.getElementById("btn-fetch-libraries").addEventListener("click", async (
 });
 
 /* ── YouTube folder options ──────────────────────────────────────────── */
-document.getElementById("jellyfin-library-select")
-  .addEventListener("change", _updateYoutubeFolderOptions);
+let _ytFolderUserSelected = false;
 
-function _updateYoutubeFolderOptions() {
+document.querySelectorAll('input[name="yt_folder"]').forEach(radio => {
+  radio.addEventListener("change", () => { _ytFolderUserSelected = true; });
+});
+
+document.getElementById("jellyfin-library-select")
+  .addEventListener("change", () => _updateYoutubeFolderOptions(false));
+
+function _updateYoutubeFolderOptions(isFirstLoad = false) {
   const select  = document.getElementById("jellyfin-library-select");
   const lib     = _libraries.find(l => l.path === select.value);
   if (!lib) return;
@@ -153,15 +159,17 @@ function _updateYoutubeFolderOptions() {
   const createRadio   = document.getElementById("yt-create-new");
 
   if (lib.youtube_exists) {
-    // Existing youtube folder found — default to using it
     existingLabel.textContent = lib.youtube_path;
     existingRadio.disabled    = false;
-    existingRadio.checked     = true;
+    if (isFirstLoad || !_ytFolderUserSelected) {
+      existingRadio.checked = true;
+    }
   } else {
-    // No youtube folder — default to creating one
     existingLabel.textContent = "none found";
     existingRadio.disabled    = true;
-    createRadio.checked       = true;
+    if (isFirstLoad || !_ytFolderUserSelected) {
+      createRadio.checked = true;
+    }
   }
 }
 
