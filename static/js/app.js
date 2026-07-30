@@ -63,7 +63,7 @@ function buildCard(ch) {
 function updateCardStats(card, ch) {
   card.querySelector(".stat-available").textContent  = ch.total_available ?? "—";
   card.querySelector(".stat-downloaded").textContent = ch.downloaded_count ?? ch.total_downloaded ?? "—";
-  card.querySelector(".stat-pending").textContent    = ch.pending_count ?? "—";
+  card.querySelector(".stat-available-count").textContent = ch.pending_count ?? "—";
   card.querySelector(".last-checked-val").textContent = fmtDate(ch.last_checked);
 }
 
