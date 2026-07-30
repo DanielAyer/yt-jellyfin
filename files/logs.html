@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>YT-Jellyfin — Logs</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&family=Inter:wght@300;400;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/static/css/style.css" />
+  <link rel="stylesheet" href="/static/css/logs.css" />
+</head>
+<body>
+
+  <!-- ── GLOBAL DISK WARNING BANNER ──────────────────────────────────── -->
+  <div id="disk-warning-banner" class="disk-warning-banner hidden">
+    <span class="disk-warning-icon">⚠</span>
+    <span id="disk-warning-text">Warning: Low Disk Space</span>
+    <button id="disk-warning-close" class="disk-warning-close" title="Dismiss">✕</button>
+  </div>
+
+  <header class="site-header">
+    <div class="header-inner">
+      <div class="logo">
+        <a href="/" style="display:flex;align-items:center;gap:0.5rem;text-decoration:none;">
+          <span class="logo-mark">◀</span>
+          <span class="logo-text" style="color:var(--muted);">Back</span>
+        </a>
+        <span class="logo-divider">|</span>
+        <span class="logo-text">Logs</span>
+      </div>
+      <div class="header-actions">
+        <div class="log-filter-group">
+          <button class="log-filter-btn active" data-level="all">All</button>
+          <button class="log-filter-btn" data-level="INFO">Info</button>
+          <button class="log-filter-btn" data-level="WARNING">Warning</button>
+          <button class="log-filter-btn" data-level="ERROR">Error</button>
+        </div>
+        <button id="btn-follow" class="btn btn-primary btn-sm">Follow live</button>
+        <button id="btn-download-log" class="btn btn-ghost btn-sm">↓ Download</button>
+      </div>
+    </div>
+  </header>
+
+  <div id="alert-bar" class="alert-bar hidden">
+    <span id="alert-bar-text"></span>
+    <button id="alert-bar-close" class="disk-warning-close">✕</button>
+  </div>
+
+  <main class="logs-main">
+    <div id="log-container" class="log-container">
+      <div id="log-output" class="log-output"></div>
+    </div>
+    <div id="log-status" class="log-status muted">Loading…</div>
+  </main>
+
+  <script src="/static/js/logs.js"></script>
+</body>
+</html>

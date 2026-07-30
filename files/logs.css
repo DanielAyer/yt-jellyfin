@@ -1,0 +1,72 @@
+/* ── logs page ───────────────────────────────────────────────────────── */
+
+.logs-main {
+  max-width: 1200px;
+  margin: 1.25rem auto 2rem;
+  padding: 0 1.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.log-filter-group {
+  display: flex;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+.log-filter-btn {
+  background: transparent;
+  border: none;
+  border-right: 1px solid var(--border);
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 0.72rem;
+  font-weight: 600;
+  padding: 0.3rem 0.7rem;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+  letter-spacing: 0.03em;
+}
+.log-filter-btn:last-child { border-right: none; }
+.log-filter-btn:hover { color: var(--text); }
+.log-filter-btn.active { background: var(--surface2); color: var(--text); }
+
+.log-container {
+  background: #090b10;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  height: calc(100vh - 160px);
+  overflow-y: auto;
+  padding: 0.75rem 1rem;
+}
+
+.log-output {
+  font-family: var(--mono);
+  font-size: 0.78rem;
+  line-height: 1.7;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+.log-line { display: block; }
+.log-line.level-INFO    { color: #8ab4d4; }
+.log-line.level-WARNING { color: #e0a652; }
+.log-line.level-ERROR   { color: #e05252; }
+.log-line.level-DEBUG   { color: #5c6880; }
+.log-line.level-other   { color: #7a8a9a; }
+
+.log-line.hidden { display: none; }
+
+.log-status {
+  font-family: var(--mono);
+  font-size: 0.72rem;
+  text-align: right;
+}
+
+/* follow indicator */
+.follow-active {
+  background: var(--accent) !important;
+  color: #000 !important;
+  border-color: var(--accent) !important;
+}

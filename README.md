@@ -115,6 +115,54 @@ The service file sets config via `Environment=` lines, which take priority over 
 
 ---
 
+## Firewall configuration
+
+yt-jellyfin is a LAN-only application. It should never be exposed directly to the internet — if you need remote access, use a VPN.
+
+Two network requirements:
+
+- **Inbound port 5000** (or your configured `PORT`) — allows browsers on your LAN to reach the web UI
+- **Outbound port 443** (HTTPS) — allows yt-dlp to reach YouTube for metadata and downloads
+
+### Router-level firewall (pfSense, OPNsense, consumer routers)
+
+If your firewall lives on the router rather than the server, the default LAN policy on most routers (including pfSense) already permits all outbound traffic and all inbound LAN-to-LAN traffic. In most cases no changes are needed.
+
+The reference setup used during development:
+- ISP modem → pfSense router (firewall) → ASUS router (WAP only, no NAT)
+- pfSense default LAN rule permits all LAN traffic — no additional rules required
+- Outbound 443 permitted by default WAN policy
+
+If you have a restrictive inter-VLAN policy or have locked down your LAN rules, add an explicit allow for port 5000 from your LAN subnet to the server's IP.
+
+### Host-level firewall (ufw)
+
+If your server runs `ufw`, it may block inbound connections to port 5000 by default. Check and fix:
+
+```bash
+sudo ufw status
+sudo ufw allow 5000/tcp
+sudo ufw reload
+```
+
+If your `PORT` is set to something other than 5000, substitute that value.
+
+### Checking outbound connectivity
+
+yt-dlp requires outbound HTTPS access to YouTube. Test it from the server:
+
+```bash
+curl -s --max-time 5 https://www.youtube.com > /dev/null && echo "OK" || echo "FAILED"
+```
+
+If this fails, check your firewall's outbound rules for port 443.
+
+### Security note
+
+Do not open port 5000 on your WAN interface. yt-jellyfin has no authentication layer and is designed for trusted LAN access only. If you need to access it remotely, use a VPN to connect to your LAN first.
+
+---
+
 ## Jellyfin setup
 
 In Jellyfin: **Dashboard → Libraries → Add Media Library**
