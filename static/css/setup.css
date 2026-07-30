@@ -112,9 +112,37 @@ code {
   padding: 1rem;
   font-family: var(--mono);
   font-size: 0.8rem;
-  white-space: pre-wrap;
   line-height: 1.6;
   margin-top: 0.5rem;
 }
 .setup-result.ok  { border-color: var(--accent); color: var(--accent); }
 .setup-result.err { border-color: var(--danger);  color: var(--danger); }
+
+/* restart command block */
+.restart-block {
+  margin-top: 0.75rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+.restart-label { font-size: 0.78rem; }
+.restart-cmd-wrap {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  background: #090b10;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 0.5rem 0.75rem;
+}
+.restart-cmd {
+  flex: 1;
+  font-family: var(--mono);
+  font-size: 0.82rem;
+  color: var(--accent);
+  white-space: nowrap;
+  overflow-x: auto;
+  background: transparent;
+  border: none;
+  padding: 0;
+}

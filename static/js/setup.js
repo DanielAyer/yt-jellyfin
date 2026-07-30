@@ -256,8 +256,10 @@ document.getElementById("btn-save-setup").addEventListener("click", async () => 
     });
 
     result.className = "setup-result ok";
-    result.textContent = data.message;
+    result.textContent = "✓ Configuration saved successfully.";
     result.classList.remove("hidden");
+    document.getElementById("restart-block").classList.remove("hidden");
+    document.getElementById("restart-block").style.display = "flex";
 
   } catch (e) {
     result.className = "setup-result err";
@@ -266,6 +268,24 @@ document.getElementById("btn-save-setup").addEventListener("click", async () => 
     btn.disabled = false;
     btn.textContent = "Save Configuration";
   }
+});
+
+/* ── copy restart command ─────────────────────────────────────────────── */
+document.getElementById("btn-copy-restart")?.addEventListener("click", () => {
+  const cmd = document.getElementById("restart-cmd").textContent;
+  navigator.clipboard.writeText(cmd).then(() => {
+    const btn = document.getElementById("btn-copy-restart");
+    btn.textContent = "Copied!";
+    setTimeout(() => { btn.textContent = "Copy"; }, 2000);
+  }).catch(() => {
+    // Fallback for browsers without clipboard API
+    const el = document.createElement("textarea");
+    el.value = cmd;
+    document.body.appendChild(el);
+    el.select();
+    document.execCommand("copy");
+    document.body.removeChild(el);
+  });
 });
 
 /* ── init ────────────────────────────────────────────────────────────── */

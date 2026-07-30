@@ -36,10 +36,26 @@ ENV_PATH    = os.path.join(INSTALL_DIR, ".env")
 def is_setup_complete() -> bool:
     """
     Returns True if the minimum required config is present and valid.
-    Checks the environment (which includes any loaded .env values).
+    Checks os.environ first (set at startup or by write_env()),
+    then falls back to reading .env directly so changes take effect
+    without a restart when called after write_env().
     """
     library_root = os.environ.get("LIBRARY_ROOT", "").strip()
     db_path      = os.environ.get("DB_PATH", "").strip()
+
+    # If not in environment, try reading .env directly
+    if not library_root or not db_path:
+        try:
+            with open(ENV_PATH, "r") as f:
+                for line in f:
+                    line = line.strip()
+                    if line.startswith("LIBRARY_ROOT=") and not library_root:
+                        library_root = line.split("=", 1)[1].strip()
+                    if line.startswith("DB_PATH=") and not db_path:
+                        db_path = line.split("=", 1)[1].strip()
+        except FileNotFoundError:
+            pass
+
     return bool(library_root and db_path and os.path.isdir(library_root))
 
 

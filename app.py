@@ -15,9 +15,14 @@ app = Flask(__name__)
 # If LIBRARY_ROOT / DB_PATH are not configured, the app runs in setup mode.
 # Only the /setup routes are active; all other routes redirect to /setup.
 
-_setup_complete = is_setup_complete()
+def _is_setup_complete() -> bool:
+    """Re-check setup state on each call so changes take effect without restart."""
+    from setup import is_setup_complete
+    return is_setup_complete()
 
-if _setup_complete:
+# Always import everything — modules are only *used* when setup is complete.
+# This avoids conditional import complexity while keeping setup mode working.
+try:
     from database import init_db, get_db
     from downloader import (
         resolve_channel_id_and_name,
@@ -34,10 +39,13 @@ if _setup_complete:
     from disk_space import check_library_space, check_space
     from scheduler import start_scheduler, apply_schedule
     from updater import check_for_updates, apply_update
-    init_db()
-else:
-    log.warning("App starting in SETUP MODE — LIBRARY_ROOT or DB_PATH not configured.")
-    log.warning("Open http://<server-ip>:%d/setup to configure.", PORT)
+    if _is_setup_complete():
+        init_db()
+    else:
+        log.warning("App starting in SETUP MODE — LIBRARY_ROOT or DB_PATH not configured.")
+        log.warning("Open http://<server-ip>:%d/setup to configure.", PORT)
+except Exception as e:
+    log.warning("Some modules could not be loaded (setup mode): %s", e)
 
 # ── background task runner ─────────────────────────────────────────────────────
 
@@ -67,7 +75,7 @@ def _is_busy(task_id: str) -> bool:
 
 @app.route("/setup")
 def setup_page():
-    if _setup_complete:
+    if _is_setup_complete():
         return redirect(url_for("index"))
     return render_template("setup.html")
 
@@ -123,14 +131,14 @@ def setup_save():
 
 @app.route("/")
 def index():
-    if not _setup_complete:
+    if not _is_setup_complete():
         return redirect(url_for("setup_page"))
     return render_template("index.html")
 
 
 @app.route("/channel/<channel_id>/videos")
 def videos_page(channel_id):
-    if not _setup_complete:
+    if not _is_setup_complete():
         return redirect(url_for("setup_page"))
     with get_db() as conn:
         ch = conn.execute(
@@ -143,7 +151,7 @@ def videos_page(channel_id):
 
 @app.route("/logs")
 def logs_page():
-    if not _setup_complete:
+    if not _is_setup_complete():
         return redirect(url_for("setup_page"))
     return render_template("logs.html")
 
@@ -606,7 +614,7 @@ def list_videos(channel_id):
 
 
 if __name__ == "__main__":
-    if _setup_complete:
+    if _is_setup_complete():
         _bg("boot_last_viewed", refresh_last_viewed)
         start_scheduler()
     app.run(host=HOST, port=PORT, debug=False)

@@ -136,6 +136,13 @@
         Save Configuration
       </button>
       <div id="setup-result" class="setup-result hidden"></div>
+      <div id="restart-block" class="restart-block hidden">
+        <p class="restart-label muted">Restart the service to activate:</p>
+        <div class="restart-cmd-wrap">
+          <code id="restart-cmd" class="restart-cmd">sudo systemctl restart yt-jellyfin</code>
+          <button id="btn-copy-restart" class="btn btn-sm btn-primary" title="Copy to clipboard">Copy</button>
+        </div>
+      </div>
     </div>
 
   </div>
