@@ -4,20 +4,140 @@ import os
 import re
 import shutil
 import logging
+import threading
 from datetime import datetime
 from database import get_db
 from config import LIBRARY_ROOT
 
 log = logging.getLogger(__name__)
 
+# ── subprocess tracking for force stop ────────────────────────────────────────
+# Maps channel_id → active yt-dlp Popen object
+# Protected by _proc_lock for thread safety
 
-# ── helpers ────────────────────────────────────────────────────────────────────
+_active_procs: dict[str, subprocess.Popen] = {}
+_proc_lock = threading.Lock()
+
+
+def _register_proc(channel_id: str, proc: subprocess.Popen):
+    with _proc_lock:
+        _active_procs[channel_id] = proc
+
+
+def _unregister_proc(channel_id: str):
+    with _proc_lock:
+        _active_procs.pop(channel_id, None)
+
+
+def force_stop_channel(channel_id: str) -> dict:
+    """
+    Kill the active yt-dlp download for a channel and clean up temp files.
+
+    Cleanup scope:
+      - Kill the yt-dlp subprocess
+      - Remove any .part files in the channel folder (incomplete downloads)
+      - Remove unmerged .mp4 + .m4a pairs where no final merged file exists
+      - Leave all fully completed .mp4 files intact
+
+    Returns { ok, message, cleaned_files }
+    """
+    with get_db() as conn:
+        ch = conn.execute(
+            "SELECT * FROM channels WHERE channel_id = ?", (channel_id,)
+        ).fetchone()
+    if not ch:
+        return {"ok": False, "message": "Channel not found"}
+
+    # Kill subprocess
+    with _proc_lock:
+        proc = _active_procs.pop(channel_id, None)
+    if proc:
+        try:
+            proc.kill()
+            proc.wait(timeout=5)
+            log.info("Killed yt-dlp process for channel %s", channel_id)
+        except Exception as e:
+            log.warning("Error killing process for %s: %s", channel_id, e)
+
+    # Clean up temp files
+    out_dir = _channel_dir(ch["channel_name"])
+    cleaned = _cleanup_temp_files(out_dir)
+
+    return {
+        "ok":           True,
+        "message":      f"Download stopped. Cleaned up {len(cleaned)} temp file(s).",
+        "cleaned_files": cleaned,
+    }
+
+
+def _cleanup_temp_files(directory: str) -> list[str]:
+    """
+    Remove incomplete download artifacts from a channel folder:
+      - *.part files (yt-dlp incomplete downloads)
+      - *.mp4 + *.m4a pairs with no corresponding merged .mp4
+        (left over from interrupted ffmpeg merge)
+    """
+    cleaned = []
+    try:
+        files = os.listdir(directory)
+    except OSError:
+        return cleaned
+
+    # Remove .part files
+    for f in files:
+        if f.endswith(".part"):
+            path = os.path.join(directory, f)
+            try:
+                os.remove(path)
+                cleaned.append(f)
+                log.info("Removed temp file: %s", f)
+            except OSError as e:
+                log.warning("Could not remove %s: %s", f, e)
+
+    # Remove unmerged .m4a files (audio streams not yet merged into .mp4)
+    # These appear when ffmpeg merge was interrupted
+    for f in files:
+        if f.endswith(".m4a"):
+            # Check if a corresponding merged .mp4 exists
+            stem    = f[:-4]
+            mp4     = os.path.join(directory, stem + ".mp4")
+            m4a     = os.path.join(directory, f)
+            if not os.path.isfile(mp4) and os.path.isfile(m4a):
+                try:
+                    os.remove(m4a)
+                    cleaned.append(f)
+                    log.info("Removed unmerged audio: %s", f)
+                except OSError as e:
+                    log.warning("Could not remove %s: %s", f, e)
+
+    return cleaned
+
+
 
 def _run_ytdlp(*args, capture=True):
+    """Run yt-dlp and wait for completion. For metadata fetches."""
     cmd = ["yt-dlp", "--no-color", *args]
     log.debug("yt-dlp %s", " ".join(args))
     r = subprocess.run(cmd, capture_output=capture, text=True)
     return r
+
+
+def _run_ytdlp_tracked(channel_id: str, *args) -> int:
+    """
+    Run yt-dlp as a tracked Popen process so it can be killed via force_stop.
+    Returns the exit code, or -1 if killed.
+    """
+    cmd = ["yt-dlp", "--no-color", *args]
+    log.debug("yt-dlp (tracked) %s", " ".join(args))
+    proc = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    _register_proc(channel_id, proc)
+    try:
+        proc.wait()
+        return proc.returncode
+    except Exception:
+        return -1
+    finally:
+        _unregister_proc(channel_id)
 
 
 def _channel_dir(channel_name: str) -> str:
@@ -429,6 +549,34 @@ def resolve_channel_id_and_name(channel_url: str) -> tuple[str, str, str | None]
 
 # ── download ───────────────────────────────────────────────────────────────────
 
+def estimate_download_size(video_ids: list[str], channel_id: str) -> dict:
+    """
+    Estimate total download size from stored duration data.
+    Uses ~2.5 MB/minute as a baseline for 1080p mp4.
+    Returns { estimated_mb, estimated_gb, note }
+    """
+    MB_PER_MINUTE = 2.5
+    with get_db() as conn:
+        rows = conn.execute(
+            f"""SELECT duration FROM videos
+                WHERE channel_id = ? AND video_id IN ({','.join('?' * len(video_ids))})
+                AND duration IS NOT NULL""",
+            [channel_id] + list(video_ids),
+        ).fetchall()
+
+    total_seconds = sum(r["duration"] for r in rows if r["duration"])
+    total_minutes = total_seconds / 60
+    estimated_mb  = total_minutes * MB_PER_MINUTE
+    estimated_gb  = estimated_mb / 1024
+
+    return {
+        "estimated_mb": round(estimated_mb, 1),
+        "estimated_gb": round(estimated_gb, 2),
+        "video_count":  len(video_ids),
+        "note":         "Estimate based on ~2.5 MB/min at 1080p. Actual size may vary.",
+    }
+
+
 def download_video(video_id: str, channel_name: str, channel_id: str) -> bool:
     """
     Download a single video using yt-dlp.
@@ -439,6 +587,7 @@ def download_video(video_id: str, channel_name: str, channel_id: str) -> bool:
       3. Title_[YYYYMMDD]_N.mp4      — counter applied to all colliding files
 
     Metadata embedded in MP4 via --embed-metadata.
+    Uses tracked Popen so the process can be killed via force_stop_channel().
     """
     out_dir = _channel_dir(channel_name)
     url = f"https://www.youtube.com/watch?v={video_id}"
@@ -457,7 +606,8 @@ def download_video(video_id: str, channel_name: str, channel_id: str) -> bool:
 
     out_path = _output_path(out_dir, title, upload_date)
 
-    r = _run_ytdlp(
+    exit_code = _run_ytdlp_tracked(
+        channel_id,
         "--format",              "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best",
         "--merge-output-format", "mp4",
         "--output",              out_path,
@@ -465,16 +615,17 @@ def download_video(video_id: str, channel_name: str, channel_id: str) -> bool:
         "--embed-metadata",
         "--no-progress",
         url,
-        capture=False,
     )
 
-    if hasattr(r, "returncode") and r.returncode != 0:
-        log.warning("Download failed for %s (yt-dlp exit code %s)", video_id, r.returncode)
+    if exit_code != 0:
+        if exit_code == -1:
+            log.info("Download stopped (force stop) for %s", video_id)
+        else:
+            log.warning("Download failed for %s (yt-dlp exit code %s)", video_id, exit_code)
         _mark_video(channel_id, video_id, status="failed")
         return False
 
-    # Verify the file actually exists — yt-dlp can exit 0 without producing a file
-    # (e.g. outdated version, misconfiguration, unavailable video)
+    # Verify the file actually exists
     if not os.path.isfile(out_path):
         out_path = _find_file_by_title(out_dir, title)
 
@@ -498,6 +649,42 @@ def _find_file_by_title(directory: str, title: str) -> str | None:
         if f.startswith(safe) and f.endswith(".mp4"):
             return os.path.join(directory, f)
     return None
+
+
+def download_next_n(channel_id: str, n: int) -> dict:
+    """Download the next N oldest undownloaded videos (back catalog order)."""
+    with get_db() as conn:
+        rows = conn.execute(
+            """SELECT video_id FROM videos
+               WHERE channel_id = ? AND status = 'pending'
+               ORDER BY upload_date ASC LIMIT ?""",
+            (channel_id, n),
+        ).fetchall()
+    return download_videos_by_id([r["video_id"] for r in rows], channel_id)
+
+
+def download_latest_m(channel_id: str, m: int) -> dict:
+    """Download the M most recent undownloaded videos."""
+    with get_db() as conn:
+        rows = conn.execute(
+            """SELECT video_id FROM videos
+               WHERE channel_id = ? AND status = 'pending'
+               ORDER BY upload_date DESC LIMIT ?""",
+            (channel_id, m),
+        ).fetchall()
+    return download_videos_by_id([r["video_id"] for r in rows], channel_id)
+
+
+def download_all_pending(channel_id: str) -> dict:
+    """Download all undownloaded videos for a channel."""
+    with get_db() as conn:
+        rows = conn.execute(
+            """SELECT video_id FROM videos
+               WHERE channel_id = ? AND status = 'pending'
+               ORDER BY upload_date DESC""",
+            (channel_id,),
+        ).fetchall()
+    return download_videos_by_id([r["video_id"] for r in rows], channel_id)
 
 
 def download_videos_by_id(video_ids: list[str], channel_id: str) -> dict:

@@ -1,6 +1,6 @@
 /* ── state ────────────────────────────────────────────────────────────── */
 let channels = [];
-let activeCatalogId = null;
+let _activeChannelSettingsId = null;
 
 /* ── API helpers ─────────────────────────────────────────────────────── */
 async function api(path, { method = "GET", body } = {}) {
@@ -52,10 +52,10 @@ function buildCard(ch) {
   });
   card.querySelector(".btn-sync").addEventListener("click", () => syncChannel(ch.channel_id, card));
   card.querySelector(".btn-rebase").addEventListener("click", () => rebaseChannel(ch.channel_id, card));
-  card.querySelector(".btn-catalog").addEventListener("click", () => openCatalog(ch));
   card.querySelector(".btn-more-videos").addEventListener("click", () => {
     window.location.href = `/channel/${ch.channel_id}/videos`;
   });
+  card.querySelector(".btn-channel-settings").addEventListener("click", () => openChannelSettings(ch));
 
   return card;
 }
@@ -77,7 +77,7 @@ function setCardBusy(card, busy, label = "Working…") {
   card.classList.toggle("busy", busy);
   card.querySelector(".card-busy").classList.toggle("hidden", !busy);
   card.querySelector(".busy-label").textContent = label;
-  card.querySelectorAll(".btn-sync, .btn-rebase, .btn-catalog, .btn-more-videos, .card-remove")
+  card.querySelectorAll(".btn-sync, .btn-rebase, .btn-more-videos, .btn-channel-settings, .card-remove")
       .forEach(b => b.disabled = busy);
 }
 
@@ -192,42 +192,64 @@ document.getElementById("btn-sync-all").addEventListener("click", async () => {
   }
 });
 
-/* ── back catalog modal ──────────────────────────────────────────────── */
-function openCatalog(ch) {
-  activeCatalogId = ch.channel_id;
-  const pending = ch.pending_count ?? "?";
-  document.getElementById("catalog-info").textContent =
-    `${ch.channel_name} · ${pending} videos not yet downloaded`;
-  document.getElementById("catalog-count-input").value = Math.min(20, pending);
-  document.getElementById("catalog-status").textContent = "";
-  document.getElementById("catalog-status").className = "add-status";
-  document.getElementById("modal-catalog").classList.remove("hidden");
+/* ── channel settings modal ──────────────────────────────────────────── */
+async function openChannelSettings(ch) {
+  _activeChannelSettingsId = ch.channel_id;
+  document.getElementById("ch-settings-name").textContent = ch.channel_name;
+  document.getElementById("ch-settings-status").textContent = "";
+  document.getElementById("ch-n-catalog").value = "";
+  document.getElementById("ch-m-recent").value  = "";
+
+  try {
+    const s = await api(`/api/channels/${ch.channel_id}/settings`);
+    if (s.n_catalog_override !== null) document.getElementById("ch-n-catalog").value = s.n_catalog_override;
+    if (s.m_recent_override  !== null) document.getElementById("ch-m-recent").value  = s.m_recent_override;
+  } catch (_) {}
+
+  document.getElementById("modal-channel-settings").classList.remove("hidden");
 }
 
-document.getElementById("close-catalog").addEventListener("click", () => {
-  document.getElementById("modal-catalog").classList.add("hidden");
+document.getElementById("close-channel-settings").addEventListener("click", () => {
+  document.getElementById("modal-channel-settings").classList.add("hidden");
 });
 
-document.getElementById("btn-confirm-catalog").addEventListener("click", async () => {
-  const count  = parseInt(document.getElementById("catalog-count-input").value, 10);
-  const status = document.getElementById("catalog-status");
-  if (!count || count < 1) return;
-  status.className = "add-status";
-  status.textContent = `Queuing ${count} downloads…`;
-  document.getElementById("btn-confirm-catalog").disabled = true;
+document.getElementById("btn-save-channel-settings").addEventListener("click", async () => {
+  const status = document.getElementById("ch-settings-status");
+  const n = document.getElementById("ch-n-catalog").value;
+  const m = document.getElementById("ch-m-recent").value;
   try {
-    await api(`/api/channels/${activeCatalogId}/catalog`, { method: "POST", body: { count } });
+    await api(`/api/channels/${_activeChannelSettingsId}/settings`, {
+      method: "POST",
+      body: {
+        n_catalog: n ? parseInt(n) : null,
+        m_recent:  m ? parseInt(m) : null,
+      },
+    });
     status.className = "add-status ok";
-    status.textContent = "✓ Downloads started in background.";
+    status.textContent = "✓ Saved";
     setTimeout(() => {
-      document.getElementById("modal-catalog").classList.add("hidden");
-      loadChannels();
-    }, 1500);
+      document.getElementById("modal-channel-settings").classList.add("hidden");
+    }, 1000);
   } catch (e) {
     status.className = "add-status err";
     status.textContent = `✗ ${e.message}`;
-  } finally {
-    document.getElementById("btn-confirm-catalog").disabled = false;
+  }
+});
+
+document.getElementById("btn-reset-channel-settings").addEventListener("click", async () => {
+  const status = document.getElementById("ch-settings-status");
+  try {
+    await api(`/api/channels/${_activeChannelSettingsId}/settings`, {
+      method: "POST",
+      body: { n_catalog: null, m_recent: null },
+    });
+    document.getElementById("ch-n-catalog").value = "";
+    document.getElementById("ch-m-recent").value  = "";
+    status.className = "add-status ok";
+    status.textContent = "✓ Reset to global defaults";
+  } catch (e) {
+    status.className = "add-status err";
+    status.textContent = `✗ ${e.message}`;
   }
 });
 
@@ -238,11 +260,9 @@ document.getElementById("btn-settings").addEventListener("click", async () => {
     document.querySelectorAll('input[name="schedule_mode"]').forEach(r => {
       r.checked = r.value === s.schedule_mode;
     });
-    document.getElementById("schedule-hours").value = s.schedule_hours || 6;
-    document.getElementById("schedule-time").value  = s.schedule_time  || "03:00";
-    document.getElementById("recent-count").value   = s.recent_count   || 5;
-    document.getElementById("catalog-count").value  = s.catalog_count  || 5;
-    document.getElementById("disk-threshold").value = s.disk_threshold_pct || 10;
+    document.getElementById("pref-n-catalog").value  = s.n_catalog  || 5;
+    document.getElementById("pref-m-recent").value   = s.m_recent   || 5;
+    document.getElementById("disk-threshold").value  = s.disk_threshold_pct || 10;
     document.querySelectorAll('input[name="rebase_missing_action"]').forEach(r => {
       r.checked = r.value === (s.rebase_missing_action || "download");
     });
@@ -264,13 +284,9 @@ document.getElementById("close-settings").addEventListener("click", () => {
 });
 
 document.getElementById("btn-save-settings").addEventListener("click", async () => {
-  const mode = document.querySelector('input[name="schedule_mode"]:checked')?.value;
   const body = {
-    schedule_mode:          mode,
-    schedule_hours:         document.getElementById("schedule-hours").value,
-    schedule_time:          document.getElementById("schedule-time").value,
-    recent_count:           document.getElementById("recent-count").value,
-    catalog_count:          document.getElementById("catalog-count").value,
+    n_catalog:              document.getElementById("pref-n-catalog").value,
+    m_recent:               document.getElementById("pref-m-recent").value,
     disk_threshold_pct:     document.getElementById("disk-threshold").value,
     rebase_missing_action:  document.querySelector('input[name="rebase_missing_action"]:checked')?.value || "download",
   };

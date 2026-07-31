@@ -23,19 +23,24 @@ def _is_setup_complete() -> bool:
 # Always import everything — modules are only *used* when setup is complete.
 # This avoids conditional import complexity while keeping setup mode working.
 try:
-    from database import init_db, get_db
-    from downloader import (
+    from database import init_db, get_db, get_channel_settings, save_channel_settings
         resolve_channel_id_and_name,
         fetch_channel_metadata,
         sync_channel,
         download_back_catalog,
         sync_all_channels,
         download_videos_by_id,
+        download_next_n,
+        download_latest_m,
+        download_all_pending,
+        estimate_download_size,
+        force_stop_channel,
         delete_video_file,
         delete_channel_folder,
         refresh_last_viewed,
         rebase_channel,
     )
+    from database import init_db, get_db, get_channel_settings, save_channel_settings
     from disk_space import check_library_space, check_space
     from scheduler import start_scheduler, apply_schedule
     from updater import check_for_updates, apply_update
@@ -469,6 +474,111 @@ def rebase(channel_id):
     return jsonify({"ok": True, "message": "rebase started"})
 
 
+@app.route("/api/channels/<channel_id>/stop", methods=["POST"])
+def stop_download(channel_id):
+    """Force stop the active download for a channel and clean up temp files."""
+    try:
+        result = force_stop_channel(channel_id)
+        return jsonify(result)
+    except Exception as e:
+        log.exception("Error stopping download for %s: %s", channel_id, e)
+        return jsonify({"ok": False, "message": str(e)}), 500
+
+
+@app.route("/api/channels/<channel_id>/settings", methods=["GET"])
+def get_channel_settings_route(channel_id):
+    """Get effective settings for a channel (per-channel overrides + global fallbacks)."""
+    try:
+        settings = get_channel_settings(channel_id)
+        # Also return raw per-channel values so UI knows what's overridden
+        with get_db() as conn:
+            row = conn.execute(
+                "SELECT * FROM channel_settings WHERE channel_id = ?", (channel_id,)
+            ).fetchone()
+        settings["has_override"] = row is not None
+        settings["n_catalog_override"] = row["n_catalog"] if row else None
+        settings["m_recent_override"]  = row["m_recent"]  if row else None
+        return jsonify(settings)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/channels/<channel_id>/settings", methods=["POST"])
+def save_channel_settings_route(channel_id):
+    """Save per-channel settings. Pass null to reset to global default."""
+    data = request.json or {}
+    try:
+        n = int(data["n_catalog"]) if data.get("n_catalog") is not None else None
+        m = int(data["m_recent"])  if data.get("m_recent")  is not None else None
+        save_channel_settings(channel_id, n, m)
+        return jsonify({"ok": True})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/channels/<channel_id>/estimate", methods=["POST"])
+def size_estimate(channel_id):
+    """Estimate download size for a list of video IDs."""
+    data = request.json or {}
+    video_ids = data.get("video_ids", [])
+    if not video_ids:
+        return jsonify({"error": "no video_ids provided"}), 400
+    try:
+        result = estimate_download_size(video_ids, channel_id)
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/channels/<channel_id>/download/next-n", methods=["POST"])
+def download_next_n_route(channel_id):
+    """Download the next N oldest undownloaded videos."""
+    space = check_library_space()
+    if not space["ok"]:
+        return jsonify({"error": "low_disk", "message": space["message"]}), 507
+
+    task_id = f"download_{channel_id}"
+    if _is_busy(task_id):
+        return jsonify({"error": "already running"}), 409
+
+    settings = get_channel_settings(channel_id)
+    n = int(request.json.get("n", settings["n_catalog"])) if request.json else settings["n_catalog"]
+    _bg(task_id, download_next_n, channel_id, n)
+    return jsonify({"ok": True, "message": f"Downloading next {n} videos"})
+
+
+@app.route("/api/channels/<channel_id>/download/latest-m", methods=["POST"])
+def download_latest_m_route(channel_id):
+    """Download the M most recent undownloaded videos."""
+    space = check_library_space()
+    if not space["ok"]:
+        return jsonify({"error": "low_disk", "message": space["message"]}), 507
+
+    task_id = f"download_{channel_id}"
+    if _is_busy(task_id):
+        return jsonify({"error": "already running"}), 409
+
+    settings = get_channel_settings(channel_id)
+    m = int(request.json.get("m", settings["m_recent"])) if request.json else settings["m_recent"]
+    _bg(task_id, download_latest_m, channel_id, m)
+    return jsonify({"ok": True, "message": f"Downloading latest {m} videos"})
+
+
+@app.route("/api/channels/<channel_id>/download/all", methods=["POST"])
+def download_all_route(channel_id):
+    """Download all undownloaded videos for a channel."""
+    space = check_library_space()
+    if not space["ok"]:
+        return jsonify({"error": "low_disk", "message": space["message"]}), 507
+
+    task_id = f"download_{channel_id}"
+    if _is_busy(task_id):
+        return jsonify({"error": "already running"}), 409
+
+    _bg(task_id, download_all_pending, channel_id)
+    return jsonify({"ok": True, "message": "Downloading all pending videos"})
+
+
 # ── sync / download API ────────────────────────────────────────────────────────
 
 @app.route("/api/channels/<channel_id>/sync", methods=["POST"])
@@ -567,9 +677,10 @@ def get_settings():
 def update_settings():
     data = request.json or {}
     allowed = {
-        "schedule_mode", "schedule_hours", "schedule_time",
-        "recent_count", "catalog_count", "disk_threshold_pct",
+        "n_catalog", "m_recent",
+        "disk_threshold_pct",
         "rebase_missing_action",
+        # TODO: scheduled sync — add back as advanced option in future
     }
     with get_db() as conn:
         for key, value in data.items():

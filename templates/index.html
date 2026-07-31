@@ -66,25 +66,17 @@
       </div>
       <div class="modal-body">
         <fieldset class="field-group">
-          <legend class="field-legend">Sync Schedule</legend>
-          <label class="radio-row"><input type="radio" name="schedule_mode" value="manual" /> Manual only</label>
-          <label class="radio-row"><input type="radio" name="schedule_mode" value="boot" /> Once on boot</label>
-          <label class="radio-row">
-            <input type="radio" name="schedule_mode" value="interval" />
-            Every <input type="number" id="schedule-hours" class="inline-num" min="1" max="168" value="6" /> hours
+          <legend class="field-legend">Preferences</legend>
+          <p class="field-note" style="margin-bottom:0.5rem">
+            Default values inherited by each channel. Override per-channel via ⚙ on the channel card.
+          </p>
+          <label class="field-label">
+            N — Download next N from back catalog
+            <input type="number" id="pref-n-catalog" class="field-input" min="1" max="500" value="5" />
           </label>
-          <label class="radio-row">
-            <input type="radio" name="schedule_mode" value="daily" />
-            Daily at <input type="time" id="schedule-time" class="inline-time" value="03:00" />
-          </label>
-        </fieldset>
-        <fieldset class="field-group">
-          <legend class="field-legend">Per-Sync Limits</legend>
-          <label class="field-label">Recent videos per channel
-            <input type="number" id="recent-count" class="field-input" min="1" max="50" value="5" />
-          </label>
-          <label class="field-label">Back-catalog videos per channel
-            <input type="number" id="catalog-count" class="field-input" min="0" max="50" value="5" />
+          <label class="field-label">
+            M — Download latest M recent uploads
+            <input type="number" id="pref-m-recent" class="field-input" min="1" max="500" value="5" />
           </label>
         </fieldset>
         <fieldset class="field-group">
@@ -94,6 +86,18 @@
             <input type="number" id="disk-threshold" class="field-input" min="5" max="50" value="10" />
           </label>
           <p class="field-note">Downloads are blocked when free space falls below this threshold. Hard floor: 5%.</p>
+        </fieldset>
+        <fieldset class="field-group">
+          <legend class="field-legend">Rebase Behaviour</legend>
+          <p class="field-note" style="margin-bottom:0.5rem">When Rebase finds DB entries with no matching file on disk:</p>
+          <label class="radio-row">
+            <input type="radio" name="rebase_missing_action" value="download" />
+            Download missing files <em style="color:var(--muted);font-style:normal">(default)</em>
+          </label>
+          <label class="radio-row">
+            <input type="radio" name="rebase_missing_action" value="remove" />
+            Remove database entries
+          </label>
         </fieldset>
         <fieldset class="field-group">
           <legend class="field-legend">Updates</legend>
@@ -112,18 +116,6 @@
             <button id="btn-apply-update" class="btn btn-accent btn-sm">Apply Selected Version</button>
           </div>
           <p id="update-status-msg" class="add-status" style="margin-top:0.5rem;"></p>
-        </fieldset>
-        <fieldset class="field-group">
-          <legend class="field-legend">Rebase Behaviour</legend>
-          <p class="field-note" style="margin-bottom:0.5rem">When Rebase finds DB entries with no matching file on disk:</p>
-          <label class="radio-row">
-            <input type="radio" name="rebase_missing_action" value="download" />
-            Download missing files <em style="color:var(--muted);font-style:normal">(default)</em>
-          </label>
-          <label class="radio-row">
-            <input type="radio" name="rebase_missing_action" value="remove" />
-            Remove database entries
-          </label>
         </fieldset>
         <button id="btn-save-settings" class="btn btn-accent" style="width:100%;margin-top:0.5rem">Save Settings</button>
         <p id="settings-status" class="add-status"></p>
@@ -145,6 +137,32 @@
         </label>
         <button id="btn-confirm-catalog" class="btn btn-accent" style="width:100%;margin-top:1rem">Start Download</button>
         <p id="catalog-status" class="add-status"></p>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── CHANNEL SETTINGS MODAL ───────────────────────────────────────── -->
+  <div id="modal-channel-settings" class="modal-backdrop hidden">
+    <div class="modal modal--sm">
+      <div class="modal-header">
+        <h2>Channel Settings — <span id="ch-settings-name"></span></h2>
+        <button class="modal-close" id="close-channel-settings">✕</button>
+      </div>
+      <div class="modal-body">
+        <p class="field-note" style="margin-bottom:0.75rem">
+          Override global defaults for this channel. Leave blank to inherit from Settings.
+        </p>
+        <label class="field-label">
+          N — Download next N from back catalog
+          <input type="number" id="ch-n-catalog" class="field-input" min="1" max="500" placeholder="Global default" />
+        </label>
+        <label class="field-label" style="margin-top:0.5rem">
+          M — Download latest M recent uploads
+          <input type="number" id="ch-m-recent" class="field-input" min="1" max="500" placeholder="Global default" />
+        </label>
+        <button id="btn-save-channel-settings" class="btn btn-accent" style="width:100%;margin-top:1rem">Save</button>
+        <button id="btn-reset-channel-settings" class="btn btn-ghost" style="width:100%;margin-top:0.4rem">Reset to global defaults</button>
+        <p id="ch-settings-status" class="add-status"></p>
       </div>
     </div>
   </div>
@@ -184,8 +202,8 @@
         <div class="card-actions">
           <button class="btn btn-sm btn-sync">Sync Now</button>
           <button class="btn btn-sm btn-rebase">Rebase</button>
-          <button class="btn btn-sm btn-catalog">Back Catalog…</button>
-          <button class="btn btn-sm btn-more-videos">More Videos</button>
+          <button class="btn btn-sm btn-more-videos">Videos</button>
+          <button class="btn-icon btn-channel-settings" title="Channel settings">⚙</button>
         </div>
         <div class="card-busy hidden">
           <span class="spinner"></span> <span class="busy-label">Working…</span>

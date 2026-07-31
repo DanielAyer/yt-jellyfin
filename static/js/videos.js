@@ -144,42 +144,128 @@ document.getElementById("btn-deselect-all").addEventListener("click", () => {
   renderGrid();
 });
 
-/* ── download button ─────────────────────────────────────────────────── */
-function updateDownloadBtn() {
-  const btn = document.getElementById("btn-download-selected");
-  const cnt = document.getElementById("selected-count");
-  cnt.textContent = selected.size;
-  btn.disabled = selected.size === 0;
+/* ── channel settings (N and M) ──────────────────────────────────────── */
+let _chSettings = { n_catalog: 5, m_recent: 5 };
+
+async function loadChannelSettings() {
+  try {
+    _chSettings = await api(`/api/channels/${CHANNEL_ID}/settings`);
+    document.getElementById("n-label").textContent = _chSettings.n_catalog;
+    document.getElementById("m-label").textContent = _chSettings.m_recent;
+  } catch (_) {}
 }
 
-document.getElementById("btn-download-selected").addEventListener("click", async () => {
-  if (selected.size === 0) return;
-  const btn    = document.getElementById("btn-download-selected");
-  const status = document.getElementById("download-status");
-
-  btn.disabled = true;
-  const ids = [...selected];
-
-  status.classList.remove("hidden");
-  status.innerHTML = `<span class="spinner"></span> Queuing ${ids.length} download${ids.length !== 1 ? "s" : ""}…`;
-
+/* ── size estimate ───────────────────────────────────────────────────── */
+async function showSizeEstimate(videoIds) {
+  const el = document.getElementById("size-estimate");
+  if (!videoIds || videoIds.length === 0) { el.classList.add("hidden"); return; }
+  el.classList.remove("hidden");
+  el.className = "size-estimate";
+  el.textContent = "Estimating size…";
   try {
-    await api(`/api/channels/${CHANNEL_ID}/download`, {
-      method: "POST",
-      body: { video_ids: ids },
+    const est = await api(`/api/channels/${CHANNEL_ID}/estimate`, {
+      method: "POST", body: { video_ids: videoIds },
     });
-    status.innerHTML = `✓ ${ids.length} download${ids.length !== 1 ? "s" : ""} started in background. Refresh when complete.`;
+    el.className = "size-estimate loaded";
+    el.textContent = `${videoIds.length} video${videoIds.length !== 1 ? "s" : ""} — estimated ${est.estimated_gb >= 1 ? est.estimated_gb + " GB" : est.estimated_mb + " MB"} (${est.note})`;
+  } catch (_) {
+    el.textContent = "Could not estimate size.";
+  }
+}
+
+/* ── active download tracking ────────────────────────────────────────── */
+let _downloadActive = false;
+
+function setDownloadActive(active) {
+  _downloadActive = active;
+  const stopBtn = document.getElementById("btn-force-stop");
+  const dlBtns  = ["btn-dl-all", "btn-dl-next-n", "btn-dl-latest-m", "btn-dl-selected"];
+  stopBtn.classList.toggle("hidden", !active);
+  dlBtns.forEach(id => {
+    const btn = document.getElementById(id);
+    if (btn) btn.disabled = active;
+  });
+}
+
+/* ── download buttons ────────────────────────────────────────────────── */
+function updateDownloadBtn() {
+  const btn = document.getElementById("btn-dl-selected");
+  const cnt = document.getElementById("selected-count");
+  cnt.textContent = selected.size;
+  btn.disabled = selected.size === 0 || _downloadActive;
+  // show size estimate for selection
+  if (selected.size > 0) showSizeEstimate([...selected]);
+  else document.getElementById("size-estimate").classList.add("hidden");
+}
+
+async function _startDownload(endpoint, label, body = {}) {
+  const statusEl = document.getElementById("download-status");
+  statusEl.classList.remove("hidden");
+  statusEl.innerHTML = `<span class="spinner"></span> ${label}…`;
+  setDownloadActive(true);
+  try {
+    await api(endpoint, { method: "POST", body });
+    statusEl.innerHTML = `✓ ${label} started. Refresh when complete.`;
     selected.clear();
     updateDownloadBtn();
   } catch (e) {
     if (e.message === "low_disk") {
       checkDiskSpace();
-      showAlert("Download blocked: disk space is below your threshold. Free up space or adjust the limit in Settings.");
-      status.classList.add("hidden");
+      showAlert("Download blocked: disk space is below threshold. Free up space or adjust in Settings.");
+      statusEl.classList.add("hidden");
     } else {
-      status.innerHTML = `✗ Failed: ${e.message}`;
+      statusEl.innerHTML = `✗ Failed: ${e.message}`;
     }
-    btn.disabled = false;
+    setDownloadActive(false);
+  }
+}
+
+document.getElementById("btn-dl-all").addEventListener("click", async () => {
+  const pending = allVideos.filter(v => v.status !== "downloaded");
+  await showSizeEstimate(pending.map(v => v.video_id));
+  if (!confirm(`Download all ${pending.length} undownloaded videos?`)) return;
+  await _startDownload(`/api/channels/${CHANNEL_ID}/download/all`, `Downloading all ${pending.length} videos`);
+});
+
+document.getElementById("btn-dl-next-n").addEventListener("click", async () => {
+  const n = _chSettings.n_catalog;
+  const pending = allVideos.filter(v => v.status !== "downloaded")
+    .sort((a, b) => a.upload_date?.localeCompare(b.upload_date)).slice(0, n);
+  await showSizeEstimate(pending.map(v => v.video_id));
+  if (!confirm(`Download next ${n} back-catalog videos?`)) return;
+  await _startDownload(`/api/channels/${CHANNEL_ID}/download/next-n`, `Downloading next ${n} videos`, { n });
+});
+
+document.getElementById("btn-dl-latest-m").addEventListener("click", async () => {
+  const m = _chSettings.m_recent;
+  const pending = allVideos.filter(v => v.status !== "downloaded")
+    .sort((a, b) => b.upload_date?.localeCompare(a.upload_date)).slice(0, m);
+  await showSizeEstimate(pending.map(v => v.video_id));
+  if (!confirm(`Download latest ${m} recent videos?`)) return;
+  await _startDownload(`/api/channels/${CHANNEL_ID}/download/latest-m`, `Downloading latest ${m} videos`, { m });
+});
+
+document.getElementById("btn-dl-selected").addEventListener("click", async () => {
+  if (selected.size === 0) return;
+  const ids = [...selected];
+  if (!confirm(`Download ${ids.length} selected video${ids.length !== 1 ? "s" : ""}?`)) return;
+  await _startDownload(
+    `/api/channels/${CHANNEL_ID}/download`,
+    `Downloading ${ids.length} selected videos`,
+    { video_ids: ids }
+  );
+});
+
+/* ── force stop ──────────────────────────────────────────────────────── */
+document.getElementById("btn-force-stop").addEventListener("click", async () => {
+  if (!confirm("Stop the current download? Completed videos are safe. The current in-progress file will be cleaned up.")) return;
+  try {
+    const result = await api(`/api/channels/${CHANNEL_ID}/stop`, { method: "POST" });
+    const statusEl = document.getElementById("download-status");
+    statusEl.innerHTML = `⏹ ${result.message}`;
+    setDownloadActive(false);
+  } catch (e) {
+    showAlert(`Stop failed: ${e.message}`);
   }
 });
 
@@ -243,4 +329,5 @@ setInterval(checkDiskSpace, 60_000);
 
 /* ── init ────────────────────────────────────────────────────────────── */
 checkDiskSpace();
+loadChannelSettings();
 loadVideos();
