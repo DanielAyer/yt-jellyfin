@@ -104,6 +104,20 @@ code {
   margin-top: 0.75rem;
 }
 
+/* library not found alert */
+.library-alert {
+  margin-top: 0.75rem;
+  background: #1a1200;
+  border: 1px solid #e0a652;
+  border-radius: var(--radius);
+  padding: 0.75rem 1rem;
+  font-size: 0.82rem;
+  color: #e0a652;
+  line-height: 1.5;
+}
+.library-alert a { color: #e0a652; text-decoration: underline; }
+.library-alert strong { font-weight: 600; }
+
 /* result */
 .setup-result {
   background: var(--surface);

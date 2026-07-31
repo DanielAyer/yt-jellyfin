@@ -71,23 +71,20 @@
         <div class="step-num">3</div>
         <div class="step-body">
           <h3 class="step-title">Select library folder</h3>
-          <p class="muted step-desc">Choose which Jellyfin library to use for YouTube content.</p>
+          <p class="muted step-desc">
+            Choose which Jellyfin library yt-jellyfin should use for YouTube content.
+            The library's folder path will become your download location.
+          </p>
           <select id="jellyfin-library-select" class="field-input"></select>
 
-          <div id="youtube-folder-options" style="margin-top:0.75rem;display:flex;flex-direction:column;gap:0.4rem;">
-            <p class="muted" style="font-size:0.78rem;font-family:var(--mono);margin-bottom:0.25rem;">YouTube subfolder:</p>
-            <label class="radio-row">
-              <input type="radio" name="yt_folder" value="existing" id="yt-use-existing" />
-              <span id="yt-existing-label">Use existing <code></code></span>
-            </label>
-            <label class="radio-row">
-              <input type="radio" name="yt_folder" value="create" id="yt-create-new" />
-              Create new <code>youtube/</code> subfolder
-            </label>
-            <label class="radio-row">
-              <input type="radio" name="yt_folder" value="custom" id="yt-custom" />
-              Use selected library folder directly
-            </label>
+          <div id="library-not-found-alert" class="library-alert hidden">
+            <p>
+              Your YouTube library isn't showing up yet. Add it in Jellyfin first:
+              <a id="jellyfin-libraries-link" href="#" target="_blank" rel="noopener">
+                Jellyfin Dashboard → Libraries
+              </a>
+              — then click <strong>Connect to Jellyfin</strong> again to refresh the list.
+            </p>
           </div>
         </div>
       </div>

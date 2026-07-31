@@ -123,22 +123,10 @@ def query_jellyfin_libraries(jellyfin_url: str, api_key: str) -> list[dict]:
         lib_type  = folder.get("CollectionType", "unknown")
         locations = folder.get("Locations", [])
         for path in locations:
-            # Check for existing youtube subfolder (case-insensitive)
-            youtube_path = None
-            try:
-                for entry in os.listdir(path):
-                    if entry.lower() == "youtube" and os.path.isdir(os.path.join(path, entry)):
-                        youtube_path = os.path.join(path, entry)
-                        break
-            except OSError:
-                pass
-
             libraries.append({
-                "name":           name,
-                "path":           path,
-                "type":           lib_type,
-                "youtube_exists": youtube_path is not None,
-                "youtube_path":   youtube_path,
+                "name":  name,
+                "path":  path,
+                "type":  lib_type,
             })
 
     return libraries
