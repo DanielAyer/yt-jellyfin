@@ -24,6 +24,7 @@ def _is_setup_complete() -> bool:
 # This avoids conditional import complexity while keeping setup mode working.
 try:
     from database import init_db, get_db, get_channel_settings, save_channel_settings
+    from downloader import (
         resolve_channel_id_and_name,
         fetch_channel_metadata,
         sync_channel,
@@ -40,7 +41,6 @@ try:
         refresh_last_viewed,
         rebase_channel,
     )
-    from database import init_db, get_db, get_channel_settings, save_channel_settings
     from disk_space import check_library_space, check_space
     from scheduler import start_scheduler, apply_schedule
     from updater import check_for_updates, apply_update
