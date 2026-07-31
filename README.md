@@ -217,6 +217,60 @@ yt-jellyfin.service    systemd unit file
 
 ---
 
+## Permissions
+
+The service runs as whatever user is specified in `User=` in the systemd service file (default: `jellyfin`). That user needs:
+
+**Ownership of the app directory:**
+```bash
+sudo chown -R jellyfin:jellyfin /opt/yt-jellyfin
+sudo chmod -R 755 /opt/yt-jellyfin
+```
+
+**Write access to LIBRARY_ROOT** (where videos are downloaded):
+```bash
+sudo chown -R jellyfin:jellyfin /path/to/your/library
+sudo chmod -R 755 /path/to/your/library
+```
+
+**Log viewer access** — the log viewer page reads from the systemd journal. Add the service user to the `systemd-journal` group:
+```bash
+sudo usermod -aG systemd-journal jellyfin
+sudo systemctl restart yt-jellyfin
+```
+
+**Using a different user:** If your Jellyfin server runs under a different account, change the `User=` line in `/etc/systemd/system/yt-jellyfin.service` to match, then run the `chown` commands above with that username instead.
+
+---
+
+## Development environment
+
+This project was developed and tested on the following setup — noted here to help diagnose environment-specific issues:
+
+**Server (production):**
+- OS: Ubuntu 22.04 LTS
+- Hardware: Intel i7-6700T, Intel HD Graphics 530 (VAAPI hardware acceleration for Jellyfin)
+- Python: 3.12.3
+- Storage: 4.5TB external USB drive mounted at `/mnt/jellyfin_hd`
+- Jellyfin running on the same machine as yt-jellyfin
+- Network: LAN-only, behind pfSense firewall (ISP modem → pfSense → ASUS WAP)
+
+**Development machine:**
+- OS: Ubuntu (hostname: RavensNest)
+- Editor: VSCode
+- Deployment: git clone on server, push/pull via GitHub
+
+**Key dependency versions at time of development:**
+- yt-dlp: installed via curl from GitHub releases (always latest)
+- ffmpeg: system package via apt
+- Flask: 3.x
+- APScheduler: 3.x
+- python-dotenv: 1.x
+
+If you encounter issues not covered in this README, checking whether your environment differs significantly from the above is a good first step.
+
+---
+
 ## Known limitations / roadmap
 
 - Tile and dashboard state updates are manual-refresh based, not real-time. A future pass could move to SSE or batched polling for live updates — see the `TODO` in `static/js/videos.js`.
