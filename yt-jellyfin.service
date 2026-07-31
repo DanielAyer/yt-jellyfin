@@ -11,12 +11,9 @@ ExecStart=/opt/yt-jellyfin/venv/bin/python app.py
 Restart=on-failure
 RestartSec=10
 Environment=PYTHONUNBUFFERED=1
-
-# REQUIRED — set these to your environment, or remove this block entirely
-# and use a .env file in the working directory instead (copy .env.example
-# to .env and fill it in).
-Environment=LIBRARY_ROOT=/path/to/your/library
-Environment=DB_PATH=/path/to/your/library/.ytjf.db
+# Configuration is read from .env in the working directory.
+# Run the app and complete the setup wizard to generate .env automatically.
+# Optional: override specific values here, e.g.:
 # Environment=PORT=5000
 
 [Install]
