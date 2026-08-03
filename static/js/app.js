@@ -46,6 +46,19 @@ function buildCard(ch) {
 
   updateCardStats(card, ch);
 
+  // Make entire card clickable — navigates to videos page
+  card.addEventListener("click", (e) => {
+    // Don't navigate if clicking a button or the card is busy
+    if (e.target.closest("button") || card.classList.contains("busy")) return;
+    card.classList.remove("card-press");
+    void card.offsetWidth; // reflow to restart animation
+    card.classList.add("card-press");
+    card.addEventListener("animationend", () => {
+      card.classList.remove("card-press");
+      window.location.href = `/channel/${ch.channel_id}/videos`;
+    }, { once: true });
+  });
+
   card.querySelector(".card-remove").addEventListener("click", (e) => {
     e.stopPropagation();
     removeChannel(ch.channel_id, card);

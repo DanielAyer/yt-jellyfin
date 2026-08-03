@@ -151,17 +151,26 @@ a:hover { text-decoration: underline; }
   gap: 1rem;
 }
 
-/* ── channel card ────────────────────────────────────────────────────── */
+@keyframes card-press {
+  0%   { transform: scale(1); }
+  40%  { transform: scale(0.97); }
+  100% { transform: scale(1); }
+}
 .channel-card {
+  position: relative;
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: var(--radius);
   overflow: hidden;
   display: flex;
   flex-direction: column;
-  transition: border-color 0.2s;
+  transition: border-color 0.2s, box-shadow 0.2s;
+  cursor: pointer;
 }
-.channel-card:hover { border-color: #3a4560; }
+.channel-card.card-press {
+  animation: card-press 0.2s ease-out forwards;
+}
+.channel-card:hover { border-color: #3a4560; box-shadow: 0 2px 12px rgba(0,0,0,0.3); }
 .channel-card.busy  { border-color: var(--accent); }
 
 /* hero thumbnail */
