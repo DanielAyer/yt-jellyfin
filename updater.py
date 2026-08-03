@@ -50,7 +50,7 @@ INSTALL_DIR = os.path.dirname(os.path.abspath(__file__))
 def get_local_version() -> str:
     """
     Read the local VERSION file.
-    Returns the version string (e.g. '0.1.0') or 'unknown' if not found.
+    Returns the version string (e.g. '1.0', 'beta-1') or 'unknown' if not found.
     """
     version_path = os.path.join(INSTALL_DIR, "VERSION")
     try:
@@ -62,11 +62,27 @@ def get_local_version() -> str:
 
 
 def _version_tuple(version_str: str) -> tuple:
-    """Convert '0.2.1' to (0, 2, 1) for comparison. Returns (0,) for unknown."""
+    """
+    Convert a version string to a tuple for comparison.
+
+    Handles our versioning scheme:
+      'beta-1' → (0, 1)   — beta releases sort before 1.0
+      '1.0'    → (1, 0)
+      '1.1'    → (1, 1)
+      'unknown' → (0, 0)
+
+    beta-N versions are treated as (0, N) so they always sort
+    below any 1.x release.
+    """
     try:
-        return tuple(int(x) for x in re.findall(r"\d+", version_str))
+        version_str = version_str.strip().lstrip("v")
+        if version_str.startswith("beta-"):
+            n = int(version_str.split("-")[1])
+            return (0, n)
+        digits = re.findall(r"\d+", version_str)
+        return tuple(int(x) for x in digits) if digits else (0, 0)
     except Exception:
-        return (0,)
+        return (0, 0)
 
 
 def is_git_install() -> bool:

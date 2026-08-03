@@ -11,7 +11,7 @@ Versions follow [Semantic Versioning](https://semver.org/).
 
 ---
 
-## [0.2.0] - 2026-07-31
+## [1.0] - 2026-07-31
 
 ### Added
 
@@ -104,7 +104,7 @@ Versions follow [Semantic Versioning](https://semver.org/).
 
 ---
 
-## [0.1.0] - 2026-06-24
+## [beta-1] - 2026-06-24
 
 Initial beta release.
 
