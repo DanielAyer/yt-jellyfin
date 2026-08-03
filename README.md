@@ -22,7 +22,7 @@ Add a channel, set a sync schedule (or trigger it manually), and new uploads lan
 
 ## Screenshot
 
-*(add a screenshot of the dashboard here once you have one)*
+![Dashboard](screenshots/channels.png)
 
 ---
 
