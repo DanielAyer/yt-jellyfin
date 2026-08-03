@@ -1,3 +1,7 @@
+# Download artifacts
+*.zip
+*.tar.gz
+
 # Environment / secrets
 .env
 
