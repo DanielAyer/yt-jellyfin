@@ -343,7 +343,7 @@ def list_channels():
         def _backfill():
             for ch in missing:
                 try:
-                    _, _, thumb = resolve_channel_id_and_name(ch["channel_url"])
+                    _, _, thumb, _ = resolve_channel_id_and_name(ch["channel_url"])
                     if thumb:
                         with get_db() as conn:
                             conn.execute(
@@ -366,9 +366,13 @@ def add_channel():
         return jsonify({"error": "url required"}), 400
 
     try:
-        channel_id, channel_name, thumbnail_url = resolve_channel_id_and_name(url)
+        channel_id, channel_name, thumbnail_url, resolved_url = resolve_channel_id_and_name(url)
     except Exception as e:
         return jsonify({"error": str(e)}), 400
+
+    # Use the resolved channel URL (may differ from input if a video URL was passed)
+    channel_url = resolved_url
+    video_url_detected = resolved_url != url
 
     with get_db() as conn:
         existing = conn.execute(
@@ -379,11 +383,11 @@ def add_channel():
         conn.execute(
             """INSERT INTO channels (channel_id, channel_name, channel_url, thumbnail_url)
                VALUES (?, ?, ?, ?)""",
-            (channel_id, channel_name, url, thumbnail_url),
+            (channel_id, channel_name, channel_url, thumbnail_url),
         )
 
     def _initial_sync():
-        videos = fetch_channel_metadata(url)
+        videos = fetch_channel_metadata(channel_url)
         if videos:
             with get_db() as conn:
                 for v in videos:
@@ -406,9 +410,14 @@ def add_channel():
 
     _bg(f"init_{channel_id}", _initial_sync)
     return jsonify({
-        "channel_id":    channel_id,
-        "channel_name":  channel_name,
-        "thumbnail_url": thumbnail_url,
+        "channel_id":          channel_id,
+        "channel_name":        channel_name,
+        "thumbnail_url":       thumbnail_url,
+        "video_url_detected":  video_url_detected,
+        "message":             (
+            f"Video URL detected — adding channel '{channel_name}' instead."
+            if video_url_detected else None
+        ),
     }), 201
 
 

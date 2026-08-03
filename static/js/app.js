@@ -131,7 +131,10 @@ document.getElementById("btn-add").addEventListener("click", async () => {
   try {
     const r = await api("/api/channels", { method: "POST", body: { url } });
     status.className = "add-status ok";
-    status.textContent = `✓ Added "${r.channel_name}" — fetching video list in background…`;
+    const msg = r.video_url_detected
+      ? `✓ ${r.message} Fetching video list…`
+      : `✓ Added "${r.channel_name}" — fetching video list in background…`;
+    status.textContent = msg;
     input.value = "";
     await loadChannels();
     setTimeout(loadChannels, 4000);

@@ -535,16 +535,41 @@ def fetch_channel_metadata(channel_url: str) -> list[dict]:
     return videos
 
 
-def resolve_channel_id_and_name(channel_url: str) -> tuple[str, str, str | None]:
-    """Return (channel_id, channel_name, thumbnail_url) for a channel URL."""
+def resolve_channel_id_and_name(channel_url: str) -> tuple[str, str, str | None, str]:
+    """
+    Return (channel_id, channel_name, thumbnail_url, resolved_channel_url).
+
+    If a video URL is passed instead of a channel URL, extracts the channel
+    from the video metadata and resolves that instead.
+    Returns a 4-tuple so callers know the canonical channel URL to store.
+    """
     r = _run_ytdlp("--flat-playlist", "--dump-single-json", "--playlist-items", "0", channel_url)
     if r.returncode != 0:
-        raise RuntimeError(f"Could not resolve channel: {r.stderr[:200]}")
+        raise RuntimeError(f"Could not resolve URL: {r.stderr[:200]}")
+
     data = json.loads(r.stdout)
+    entry_type = data.get("_type", "")
+
+    # If this is a single video, extract its channel and re-resolve
+    if entry_type == "video" or (not entry_type and data.get("webpage_url_basename") == "watch"):
+        log.info("Video URL detected — extracting channel from video metadata")
+        channel_url_from_video = data.get("channel_url") or data.get("uploader_url", "")
+        if not channel_url_from_video:
+            raise RuntimeError(
+                "Video URL detected but could not extract channel URL. "
+                "Please enter the channel URL directly."
+            )
+        # Re-resolve using the channel URL extracted from the video
+        r2 = _run_ytdlp("--flat-playlist", "--dump-single-json", "--playlist-items", "0", channel_url_from_video)
+        if r2.returncode != 0:
+            raise RuntimeError(f"Could not resolve channel from video: {r2.stderr[:200]}")
+        data = json.loads(r2.stdout)
+        channel_url = channel_url_from_video
+
     channel_id    = data.get("channel_id") or data.get("id", "")
     channel_name  = data.get("channel") or data.get("title", "Unknown")
     thumbnail_url = _pick_thumbnail(data.get("thumbnails", []))
-    return channel_id, channel_name, thumbnail_url
+    return channel_id, channel_name, thumbnail_url, channel_url
 
 
 # ── download ───────────────────────────────────────────────────────────────────
