@@ -273,9 +273,26 @@ If you encounter issues not covered in this README, checking whether your enviro
 
 ## Known limitations / roadmap
 
-- Tile and dashboard state updates are manual-refresh based, not real-time. A future pass could move to SSE or batched polling for live updates — see the `TODO` in `static/js/videos.js`.
-- Single-user, local-network design — no auth layer. Don't expose this directly to the internet without putting a reverse proxy with auth in front of it.
+### Known limitations
+
+- Tile and dashboard state updates require manual refresh — real-time push (SSE) planned for future release (see `TODO` in `static/js/videos.js`)
+- Single-user, local-network design — no authentication layer. Don't expose this directly to the internet without a reverse proxy with auth in front of it.
 - Filename sanitization is intentionally conservative; very unusual channel names may produce awkward folder names.
+- Race condition possible if sync and rebase run simultaneously on the same channel — namespaced task IDs planned for next release
+
+### Deferred (planned for next release)
+
+- **Scheduled sync** — automatic sync on boot, interval, or daily schedule; removed from UI in v0.2.0 pending a cleaner advanced options implementation
+- **Race condition fix** — channel task ID namespacing to prevent sync and rebase running simultaneously on the same channel
+- **Real-time tile updates** — SSE or batched polling to update tile download state without manual refresh
+
+### Future / developer notes
+
+- **Multi-store support** — allow user to specify additional library locations as overflow capacity when primary store fills up
+- **Cloud archive integration** — support for S3 or other cloud targets as secondary storage
+- **Log viewer SSE stream** — currently loads history on page open; a persistent SSE connection would give true real-time log tailing without the Follow button
+- **Authentication layer** — the app is LAN-only by design; a lightweight auth option (basic auth or token) would be needed before any public-facing deployment
+- **`install.sh` enhancements** — dependency version pinning, upgrade mode, rollback support
 
 ---
 
