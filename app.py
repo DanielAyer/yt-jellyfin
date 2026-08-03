@@ -55,6 +55,7 @@ except Exception as e:
 # ── background task runner ─────────────────────────────────────────────────────
 
 _running_tasks: dict[str, bool] = {}
+_task_progress: dict[str, dict] = {}  # channel_id → {current, total, label}
 _task_lock = threading.Lock()
 
 
@@ -67,6 +68,10 @@ def _bg(task_id: str, fn, *args, **kwargs):
         finally:
             with _task_lock:
                 _running_tasks[task_id] = False
+            # Clear progress when task completes
+            channel_id = task_id.split("_", 1)[-1] if "_" in task_id else task_id
+            with _task_lock:
+                _task_progress.pop(channel_id, None)
     t = threading.Thread(target=wrapper, daemon=True)
     t.start()
 
@@ -74,6 +79,18 @@ def _bg(task_id: str, fn, *args, **kwargs):
 def _is_busy(task_id: str) -> bool:
     with _task_lock:
         return _running_tasks.get(task_id, False)
+
+
+def update_progress(channel_id: str, current: int, total: int, label: str = "Downloading"):
+    """Called by downloader functions to report per-video progress."""
+    with _task_lock:
+        _task_progress[channel_id] = {
+            "active":  True,
+            "current": current,
+            "total":   total,
+            "label":   label,
+            "pct":     round((current / total) * 100) if total else 0,
+        }
 
 
 # ── setup routes ───────────────────────────────────────────────────────────────
@@ -543,7 +560,7 @@ def download_next_n_route(channel_id):
 
     settings = get_channel_settings(channel_id)
     n = int(request.json.get("n", settings["n_catalog"])) if request.json else settings["n_catalog"]
-    _bg(task_id, download_next_n, channel_id, n)
+    _bg(task_id, download_next_n, channel_id, n, update_progress)
     return jsonify({"ok": True, "message": f"Downloading next {n} videos"})
 
 
@@ -560,7 +577,7 @@ def download_latest_m_route(channel_id):
 
     settings = get_channel_settings(channel_id)
     m = int(request.json.get("m", settings["m_recent"])) if request.json else settings["m_recent"]
-    _bg(task_id, download_latest_m, channel_id, m)
+    _bg(task_id, download_latest_m, channel_id, m, update_progress)
     return jsonify({"ok": True, "message": f"Downloading latest {m} videos"})
 
 
@@ -575,7 +592,7 @@ def download_all_route(channel_id):
     if _is_busy(task_id):
         return jsonify({"error": "already running"}), 409
 
-    _bg(task_id, download_all_pending, channel_id)
+    _bg(task_id, download_all_pending, channel_id, update_progress)
     return jsonify({"ok": True, "message": "Downloading all pending videos"})
 
 
@@ -635,7 +652,7 @@ def download_selected(channel_id):
     if _is_busy(task_id):
         return jsonify({"error": "already running"}), 409
 
-    _bg(task_id, download_videos_by_id, video_ids, channel_id)
+    _bg(task_id, download_videos_by_id, video_ids, channel_id, update_progress)
     return jsonify({"ok": True, "message": f"downloading {len(video_ids)} videos"})
 
 
@@ -656,6 +673,16 @@ def sync_all():
 
     _bg(task_id, sync_all_channels, rc, cc)
     return jsonify({"ok": True, "message": "full sync started"})
+
+
+@app.route("/api/channels/<channel_id>/progress")
+def channel_progress(channel_id):
+    """Return current download progress for a channel."""
+    with _task_lock:
+        progress = _task_progress.get(channel_id)
+    if progress:
+        return jsonify(progress)
+    return jsonify({"active": False, "current": 0, "total": 0, "pct": 0, "label": ""})
 
 
 @app.route("/api/tasks/status")

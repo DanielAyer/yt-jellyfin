@@ -235,6 +235,34 @@ a:hover { text-decoration: underline; }
   color: var(--accent);
 }
 
+/* ── download progress bar ───────────────────────────────────────────── */
+.card-progress {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+.card-progress-text {
+  font-family: var(--mono);
+  font-size: 0.72rem;
+  color: var(--accent);
+  display: flex;
+  justify-content: space-between;
+}
+.card-progress-bar-wrap {
+  background: var(--surface2);
+  border-radius: 2px;
+  height: 4px;
+  overflow: hidden;
+  width: 100%;
+}
+.card-progress-bar {
+  height: 100%;
+  background: var(--accent);
+  border-radius: 2px;
+  width: 0%;
+  transition: width 0.4s ease;
+}
+
 /* ── spinner ─────────────────────────────────────────────────────────── */
 @keyframes spin { to { transform: rotate(360deg); } }
 .spinner {

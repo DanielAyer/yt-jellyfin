@@ -199,15 +199,42 @@ function updateDownloadBtn() {
 }
 
 async function _startDownload(endpoint, label, body = {}) {
-  const statusEl = document.getElementById("download-status");
+  const statusEl  = document.getElementById("download-status");
+  const progressWrap = document.getElementById("dl-progress-wrap");
+  const progressBar  = document.getElementById("dl-progress-bar");
+  const progressLabel = document.getElementById("dl-progress-label");
+  const progressCount = document.getElementById("dl-progress-count");
+
   statusEl.classList.remove("hidden");
   statusEl.innerHTML = `<span class="spinner"></span> ${label}…`;
   setDownloadActive(true);
+
   try {
     await api(endpoint, { method: "POST", body });
-    statusEl.innerHTML = `✓ ${label} started. Refresh when complete.`;
-    selected.clear();
-    updateDownloadBtn();
+    statusEl.innerHTML = `✓ ${label} started.`;
+
+    // Poll progress
+    progressWrap.classList.add("active");
+    const pollInterval = setInterval(async () => {
+      try {
+        const prog = await api(`/api/channels/${CHANNEL_ID}/progress`);
+        if (prog.active && prog.total > 0) {
+          progressLabel.textContent = prog.label || "Downloading";
+          progressCount.textContent = `${prog.current} of ${prog.total}`;
+          progressBar.style.width   = `${prog.pct}%`;
+        } else {
+          clearInterval(pollInterval);
+          progressWrap.classList.remove("active");
+          progressBar.style.width = "0%";
+          statusEl.innerHTML = `✓ ${label} complete. Refresh to see updated tile states.`;
+          setDownloadActive(false);
+          selected.clear();
+          updateDownloadBtn();
+          await loadVideos();
+        }
+      } catch (_) {}
+    }, 3000);
+
   } catch (e) {
     if (e.message === "low_disk") {
       checkDiskSpace();

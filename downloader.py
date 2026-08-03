@@ -651,7 +651,7 @@ def _find_file_by_title(directory: str, title: str) -> str | None:
     return None
 
 
-def download_next_n(channel_id: str, n: int) -> dict:
+def download_next_n(channel_id: str, n: int, progress_cb=None) -> dict:
     """Download the next N oldest undownloaded videos (back catalog order)."""
     with get_db() as conn:
         rows = conn.execute(
@@ -660,10 +660,10 @@ def download_next_n(channel_id: str, n: int) -> dict:
                ORDER BY upload_date ASC LIMIT ?""",
             (channel_id, n),
         ).fetchall()
-    return download_videos_by_id([r["video_id"] for r in rows], channel_id)
+    return download_videos_by_id([r["video_id"] for r in rows], channel_id, progress_cb)
 
 
-def download_latest_m(channel_id: str, m: int) -> dict:
+def download_latest_m(channel_id: str, m: int, progress_cb=None) -> dict:
     """Download the M most recent undownloaded videos."""
     with get_db() as conn:
         rows = conn.execute(
@@ -672,10 +672,10 @@ def download_latest_m(channel_id: str, m: int) -> dict:
                ORDER BY upload_date DESC LIMIT ?""",
             (channel_id, m),
         ).fetchall()
-    return download_videos_by_id([r["video_id"] for r in rows], channel_id)
+    return download_videos_by_id([r["video_id"] for r in rows], channel_id, progress_cb)
 
 
-def download_all_pending(channel_id: str) -> dict:
+def download_all_pending(channel_id: str, progress_cb=None) -> dict:
     """Download all undownloaded videos for a channel."""
     with get_db() as conn:
         rows = conn.execute(
@@ -684,10 +684,10 @@ def download_all_pending(channel_id: str) -> dict:
                ORDER BY upload_date DESC""",
             (channel_id,),
         ).fetchall()
-    return download_videos_by_id([r["video_id"] for r in rows], channel_id)
+    return download_videos_by_id([r["video_id"] for r in rows], channel_id, progress_cb)
 
 
-def download_videos_by_id(video_ids: list[str], channel_id: str) -> dict:
+def download_videos_by_id(video_ids: list[str], channel_id: str, progress_cb=None) -> dict:
     with get_db() as conn:
         ch = conn.execute(
             "SELECT * FROM channels WHERE channel_id = ?", (channel_id,)
@@ -695,10 +695,17 @@ def download_videos_by_id(video_ids: list[str], channel_id: str) -> dict:
     if not ch:
         return {"error": "channel not found"}
 
+    total = len(video_ids)
     results = {"downloaded": [], "failed": []}
-    for vid in video_ids:
+    for i, vid in enumerate(video_ids):
+        if progress_cb:
+            progress_cb(channel_id, i, total, "Downloading")
         ok = download_video(vid, ch["channel_name"], channel_id)
         (results["downloaded"] if ok else results["failed"]).append(vid)
+
+    if progress_cb:
+        progress_cb(channel_id, total, total, "Complete")
+
     return results
 
 

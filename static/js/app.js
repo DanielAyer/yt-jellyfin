@@ -317,11 +317,28 @@ function sleep(ms) { return new Promise(res => setTimeout(res, ms)); }
 
 async function pollUntilDone(taskId, card, channelId, maxWait = 300000) {
   const start = Date.now();
+  const progressEl  = card.querySelector(".card-progress");
+  const progressBar = card.querySelector(".card-progress-bar");
+  const progressCount = card.querySelector(".progress-count");
+  const progressLabel = card.querySelector(".progress-label");
+
   while (Date.now() - start < maxWait) {
     await sleep(3000);
     try {
+      // Update progress
+      const prog = await api(`/api/channels/${channelId}/progress`);
+      if (prog.active && prog.total > 0) {
+        progressEl.classList.remove("hidden");
+        progressLabel.textContent = prog.label || "Downloading";
+        progressCount.textContent = `${prog.current} of ${prog.total}`;
+        progressBar.style.width   = `${prog.pct}%`;
+      }
+
       const tasks = await api("/api/tasks/status");
       if (!tasks[taskId]) {
+        // Task finished
+        progressEl.classList.add("hidden");
+        progressBar.style.width = "0%";
         const updated = await api("/api/channels");
         const ch = updated.find(c => c.channel_id === channelId);
         if (ch) updateCardStats(card, ch);
@@ -331,6 +348,7 @@ async function pollUntilDone(taskId, card, channelId, maxWait = 300000) {
       }
     } catch (_) { /* network blip */ }
   }
+  progressEl.classList.add("hidden");
   setCardBusy(card, false);
 }
 

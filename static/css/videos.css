@@ -45,6 +45,36 @@
 }
 .size-estimate.loaded { color: var(--text); }
 
+/* download progress bar */
+.dl-progress-wrap {
+  display: none;
+  flex-direction: column;
+  gap: 0.3rem;
+  padding-top: 0.25rem;
+  border-top: 1px solid var(--border);
+}
+.dl-progress-wrap.active { display: flex; }
+.dl-progress-text {
+  font-family: var(--mono);
+  font-size: 0.72rem;
+  color: var(--accent);
+  display: flex;
+  justify-content: space-between;
+}
+.dl-progress-bar-wrap {
+  background: var(--surface2);
+  border-radius: 2px;
+  height: 4px;
+  overflow: hidden;
+}
+.dl-progress-bar {
+  height: 100%;
+  background: var(--accent);
+  border-radius: 2px;
+  width: 0%;
+  transition: width 0.4s ease;
+}
+
 /* filter bar */
 .filter-bar {
   display: flex;
