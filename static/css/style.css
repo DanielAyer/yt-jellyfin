@@ -244,6 +244,32 @@ a:hover { text-decoration: underline; }
   color: var(--accent);
 }
 
+/* ── fetching indicator ──────────────────────────────────────────────── */
+.card-fetching {
+  display: flex;
+  align-items: center;
+  background: var(--surface2);
+  border-radius: 4px;
+  padding: 0.55rem;
+  font-family: var(--mono);
+  font-size: 0.82rem;
+  color: var(--muted);
+}
+.fetching-text { color: var(--accent); }
+
+@keyframes ellipsis {
+  0%   { content: "."; }
+  33%  { content: ".."; }
+  66%  { content: "..."; }
+  100% { content: ""; }
+}
+.fetching-dots::after {
+  content: "";
+  animation: ellipsis 1.4s steps(1) infinite;
+  color: var(--accent);
+  font-family: var(--mono);
+}
+
 /* ── download progress bar ───────────────────────────────────────────── */
 .card-progress {
   display: flex;

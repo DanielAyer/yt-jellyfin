@@ -74,14 +74,27 @@ function buildCard(ch) {
 }
 
 function updateCardStats(card, ch) {
-  card.querySelector(".stat-available").textContent       = ch.total_available ?? "—";
-  card.querySelector(".stat-downloaded").textContent      = ch.downloaded_count ?? ch.total_downloaded ?? "—";
-  card.querySelector(".stat-available-count").textContent = ch.pending_count ?? "—";
-  const failedEl = card.querySelector(".stat-failed");
-  if (failedEl) {
-    const failed = ch.failed_count ?? 0;
-    failedEl.textContent = failed;
-    failedEl.style.color = failed > 0 ? "var(--danger)" : "";
+  const isFetching = !ch.total_available && ch.total_available !== 0 ||
+                     (ch.total_available === 0 && ch.downloaded_count === 0 && !ch.last_checked);
+
+  const fetchingEl = card.querySelector(".card-fetching");
+  const statsEl    = card.querySelector(".card-stats");
+
+  if (isFetching) {
+    if (fetchingEl) fetchingEl.classList.remove("hidden");
+    if (statsEl)    statsEl.classList.add("hidden");
+  } else {
+    if (fetchingEl) fetchingEl.classList.add("hidden");
+    if (statsEl)    statsEl.classList.remove("hidden");
+    card.querySelector(".stat-available").textContent       = ch.total_available ?? "—";
+    card.querySelector(".stat-downloaded").textContent      = ch.downloaded_count ?? ch.total_downloaded ?? "—";
+    card.querySelector(".stat-available-count").textContent = ch.pending_count ?? "—";
+    const failedEl = card.querySelector(".stat-failed");
+    if (failedEl) {
+      const failed = ch.failed_count ?? 0;
+      failedEl.textContent = failed;
+      failedEl.style.color = failed > 0 ? "var(--danger)" : "";
+    }
   }
   card.querySelector(".last-checked-val").textContent = fmtDate(ch.last_checked);
 }
@@ -137,8 +150,11 @@ document.getElementById("btn-add").addEventListener("click", async () => {
     status.textContent = msg;
     input.value = "";
     await loadChannels();
-    setTimeout(loadChannels, 4000);
+    // Poll more frequently while metadata is being fetched
+    setTimeout(loadChannels, 2000);
+    setTimeout(loadChannels, 5000);
     setTimeout(loadChannels, 10000);
+    setTimeout(loadChannels, 20000);
   } catch (e) {
     status.className = "add-status err";
     status.textContent = `✗ ${e.message}`;
