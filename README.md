@@ -1,3 +1,4 @@
+--- This Project Is Desgined To Work With An Existing Jellyfin Server ---
 # yt-jellyfin
 
 A self-hosted web app that automatically syncs YouTube channels into your [Jellyfin](https://jellyfin.org/) media library using [yt-dlp](https://github.com/yt-dlp/yt-dlp).
