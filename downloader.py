@@ -651,7 +651,7 @@ def download_video(video_id: str, channel_name: str, channel_id: str, title_cb=N
 
     exit_code = _run_ytdlp_tracked(
         channel_id,
-        "--format",              "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best",
+        "--format",              "bestvideo[vcodec^=avc]+bestaudio[ext=m4a]/bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best",
         "--merge-output-format", "mp4",
         "--output",              out_path,
         "--no-playlist",
