@@ -77,6 +77,17 @@ sudo curl -L https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp \
 
 If you previously installed via `apt`, the version at `/usr/local/bin/yt-dlp` will take priority. Verify with `which yt-dlp`.
 
+### If downloads still fail with HTTP 403 errors
+
+YouTube periodically changes its API in ways that break the current stable yt-dlp release before a fix is published. If you are getting 403 errors after updating to the latest stable version, update to the nightly build:
+
+```bash
+sudo yt-dlp --update-to nightly
+yt-dlp --version
+```
+
+Nightly builds are compiled daily from the yt-dlp master branch and contain the latest fixes. They are generally safe to use — for a fast-moving target like YouTube's API, nightly is often more reliable than an outdated stable build. Check the [yt-dlp issues page](https://github.com/yt-dlp/yt-dlp/issues) for known breakages and fixes.
+
 ---
 
 ## Quickstart, in plain English

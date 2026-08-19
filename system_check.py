@@ -52,11 +52,17 @@ def check_ytdlp():
     version = out.strip()
     age_days = None
     warnings = []
+    is_nightly = "nightly" in version.lower() or "@" in version
     try:
-        ver_date = datetime.strptime(version, "%Y.%m.%d").replace(tzinfo=timezone.utc)
-        age_days = (datetime.now(timezone.utc) - ver_date).days
-        if age_days > 30:
-            warnings.append(f"yt-dlp is {age_days} days old — update to avoid 403 errors.")
+        # Parse stable version date (YYYY.MM.DD) — skip for nightly builds
+        if not is_nightly:
+            ver_date = datetime.strptime(version.split("@")[0].strip(), "%Y.%m.%d").replace(tzinfo=timezone.utc)
+            age_days = (datetime.now(timezone.utc) - ver_date).days
+            if age_days > 30:
+                warnings.append(
+                    f"yt-dlp is {age_days} days old — update to avoid 403 errors. "
+                    f"If stable still fails, try: sudo yt-dlp --update-to nightly"
+                )
     except ValueError:
         pass
     js_configured = False

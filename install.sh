@@ -175,6 +175,8 @@ sudo chmod a+rx /usr/local/bin/yt-dlp
 
 YTDLP_VERSION=$(yt-dlp --version 2>/dev/null || echo "unknown")
 success "yt-dlp $YTDLP_VERSION (installed at /usr/local/bin/yt-dlp)"
+info "NOTE: If downloads fail with HTTP 403 errors after install, YouTube may have"
+info "broken the current stable release. Update to nightly with: sudo yt-dlp --update-to nightly"
 
 # Configure yt-dlp to use Node.js for YouTube JS challenge solving
 header "Configuring yt-dlp…"
