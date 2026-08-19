@@ -22,7 +22,7 @@ Add a channel, set a sync schedule (or trigger it manually), and new uploads lan
 
 ## Screenshot
 
-![Dashboard](screenshots/channels.png)
+*(add a screenshot of the dashboard here once you have one)*
 
 ---
 
@@ -30,13 +30,26 @@ Add a channel, set a sync schedule (or trigger it manually), and new uploads lan
 
 - Linux (tested on Ubuntu 22.04+ and Debian)
 - Python 3.11+
+- **Node.js 22+** — required by yt-dlp for YouTube JS challenge solving (see below)
 - `yt-dlp` — **do not install via `apt`** (see below)
+- `ffmpeg` — for merging video and audio streams
+- `sqlite3` — optional but useful for database maintenance
 - An existing [Jellyfin](https://jellyfin.org/) server with a library you control
 - A folder where downloaded videos will live (ideally on the same drive/volume as your Jellyfin library)
 
+### Installing Node.js 22+
+
+Node.js 22 or later is required by yt-dlp to solve YouTube's JavaScript challenges. Without it, downloads will fail with HTTP 403 errors.
+
+```bash
+curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash -
+sudo apt-get install -y nodejs
+node --version  # should show v22.x.x or later
+```
+
 ### Installing yt-dlp
 
-The version of `yt-dlp` in `apt` / `apt-get` is frequently months out of date and will fail with HTTP 400 errors from YouTube's API. Always install directly from the yt-dlp GitHub releases:
+The version of `yt-dlp` in `apt` / `apt-get` is frequently months out of date and will fail with HTTP 400 or 403 errors from YouTube's API. Always install directly from the yt-dlp GitHub releases:
 
 ```bash
 sudo curl -L https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp \
@@ -45,13 +58,24 @@ sudo chmod a+rx /usr/local/bin/yt-dlp
 yt-dlp --version
 ```
 
-To update later:
+### Configuring yt-dlp to use Node.js
+
+After installing both Node.js and yt-dlp, configure yt-dlp to use Node.js for YouTube challenge solving:
+
+```bash
+sudo mkdir -p /etc/yt-dlp
+echo "--js-runtimes node" | sudo tee /etc/yt-dlp.conf
+```
+
+This config file is read automatically by yt-dlp on every run — no changes to the app are needed.
+
+To update yt-dlp later:
 ```bash
 sudo curl -L https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp \
   -o /usr/local/bin/yt-dlp
 ```
 
-If you previously installed via `apt`, the version at `/usr/local/bin/yt-dlp` will take priority. You can verify which one is being used with `which yt-dlp`.
+If you previously installed via `apt`, the version at `/usr/local/bin/yt-dlp` will take priority. Verify with `which yt-dlp`.
 
 ---
 

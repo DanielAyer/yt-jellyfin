@@ -129,6 +129,35 @@ else
         "sudo apt-get install -y curl"
 fi
 
+# sqlite3 (useful for DB maintenance)
+if command -v sqlite3 &>/dev/null; then
+    success "sqlite3"
+else
+    ask_fix "sqlite3 not found (useful for database maintenance)" \
+        "sudo apt-get install -y sqlite3" \
+        "sudo apt-get install -y sqlite3"
+fi
+
+# Node.js >= 22 (required by yt-dlp for YouTube JS challenge solving)
+header "Checking Node.js (required for YouTube downloads)…"
+NODE_OK=false
+if command -v node &>/dev/null; then
+    NODE_MAJOR=$(node --version | sed 's/v//' | cut -d. -f1)
+    if [ "$NODE_MAJOR" -ge 22 ]; then
+        success "node $(node --version)"
+        NODE_OK=true
+    else
+        warn "Node.js $(node --version) found but version 22+ is required by yt-dlp."
+    fi
+fi
+
+if [ "$NODE_OK" = false ]; then
+    ask_fix "Node.js 22+ not found (required for YouTube JS challenge solving)" \
+        "curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash - && sudo apt-get install -y nodejs" \
+        "curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash - && sudo apt-get install -y nodejs"
+    success "node $(node --version)"
+fi
+
 # yt-dlp — always install/update via curl, never apt
 header "Installing yt-dlp (always from GitHub releases)…"
 warn "The apt version of yt-dlp is frequently outdated and will fail with YouTube API errors."
@@ -146,6 +175,16 @@ sudo chmod a+rx /usr/local/bin/yt-dlp
 
 YTDLP_VERSION=$(yt-dlp --version 2>/dev/null || echo "unknown")
 success "yt-dlp $YTDLP_VERSION (installed at /usr/local/bin/yt-dlp)"
+
+# Configure yt-dlp to use Node.js for YouTube JS challenge solving
+header "Configuring yt-dlp…"
+sudo mkdir -p /etc/yt-dlp
+if ! grep -q "js-runtimes" /etc/yt-dlp.conf 2>/dev/null; then
+    echo "--js-runtimes node" | sudo tee /etc/yt-dlp.conf > /dev/null
+    success "yt-dlp configured to use Node.js runtime (/etc/yt-dlp.conf)"
+else
+    success "yt-dlp already configured with JS runtime"
+fi
 
 # ── detect Jellyfin user ───────────────────────────────────────────────────────
 header "Detecting Jellyfin user…"
