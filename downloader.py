@@ -639,6 +639,7 @@ def download_video(video_id: str, channel_name: str, channel_id: str) -> bool:
         "--no-playlist",
         "--embed-metadata",
         "--no-progress",
+        "--js-runtimes",         "node",
         url,
     )
 
