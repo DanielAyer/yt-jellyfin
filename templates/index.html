@@ -39,7 +39,31 @@
     <button id="alert-bar-close" class="disk-warning-close">✕</button>
   </div>
 
+  <!-- ── CONTEXTUAL LOG STRIP ──────────────────────────────────────────── -->
+  <div id="log-strip" class="log-strip collapsed">
+    <div class="log-strip-header">
+      <span class="log-strip-title">SYSTEM LOGS</span>
+      <span class="log-strip-badge hidden"></span>
+      <span class="log-strip-toggle">▼</span>
+    </div>
+    <div class="log-strip-body"></div>
+  </div>
+
   <main>
+    <!-- errors banner (shown if boot log review found errors) -->
+    <div id="errors-banner" class="errors-banner hidden" style="margin:1rem 1.5rem 0;">
+      ⚠ <strong>There are errors to address in the logs.</strong>
+      <a href="/logs" style="margin-left:0.5rem;">View logs →</a>
+      <button onclick="this.parentElement.classList.add('hidden')"
+              style="margin-left:auto;background:none;border:none;color:#f08080;cursor:pointer;">✕</button>
+    </div>
+
+    <!-- dependency status panel -->
+    <div id="dep-panel" class="dep-panel hidden" style="margin:1rem 1.5rem 0;">
+      <div class="dep-panel-title">SYSTEM STATUS</div>
+      <div id="dep-grid" class="dep-grid"></div>
+    </div>
+
     <section class="add-bar">
       <div class="add-bar-inner">
         <input id="channel-url-input" type="text" class="url-input"
@@ -118,6 +142,25 @@
             <button id="btn-apply-update" class="btn btn-accent btn-sm">Apply Selected Version</button>
           </div>
           <p id="update-status-msg" class="add-status" style="margin-top:0.5rem;"></p>
+        </fieldset>
+        <fieldset class="field-group">
+          <legend class="field-legend">Log Review Window</legend>
+          <p class="field-note" style="margin-bottom:0.5rem">
+            On boot, review logs from the current session plus this window of previous logs for errors.
+          </p>
+          <div style="display:flex;gap:0.5rem;align-items:center;">
+            <input type="text" id="log-review-n" class="field-input" style="width:80px"
+                   value="6" placeholder="6" />
+            <select id="log-review-unit" class="field-input" style="width:auto">
+              <option value="minutes">Minutes</option>
+              <option value="hours" selected>Hours</option>
+              <option value="days">Days</option>
+              <option value="weeks">Weeks</option>
+              <option value="months">Months</option>
+              <option value="years">Years</option>
+            </select>
+          </div>
+          <p id="log-review-error" class="add-status err" style="margin-top:0.25rem"></p>
         </fieldset>
         <button id="btn-save-settings" class="btn btn-accent" style="width:100%;margin-top:0.5rem">Save Settings</button>
         <p id="settings-status" class="add-status"></p>
@@ -224,5 +267,6 @@
   </template>
 
   <script src="/static/js/app.js"></script>
+  <script src="/static/js/log_strip.js"></script>
 </body>
 </html>

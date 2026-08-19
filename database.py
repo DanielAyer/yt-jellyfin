@@ -70,7 +70,9 @@ def init_db():
                 ('n_catalog',           '5'),
                 ('m_recent',            '5'),
                 ('disk_threshold_pct',  '10'),
-                ('rebase_missing_action', 'download');
+                ('rebase_missing_action', 'download'),
+                ('log_review_n',        '6'),
+                ('log_review_unit',     'hours');
 
             -- TODO: scheduled sync removed from UI — add back as advanced option in future
             -- ('schedule_mode',  'manual'),

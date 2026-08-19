@@ -24,6 +24,16 @@
     <button id="alert-bar-close" class="disk-warning-close">✕</button>
   </div>
 
+  <!-- ── CONTEXTUAL LOG STRIP ──────────────────────────────────────────── -->
+  <div id="log-strip" class="log-strip collapsed" data-channel-id="{{ channel.channel_id }}">
+    <div class="log-strip-header">
+      <span class="log-strip-title">CHANNEL LOGS — {{ channel.channel_name }}</span>
+      <span class="log-strip-badge hidden"></span>
+      <span class="log-strip-toggle">▼</span>
+    </div>
+    <div class="log-strip-body"></div>
+  </div>
+
   <header class="site-header">
     <div class="header-inner">
       <div class="logo">
@@ -112,5 +122,6 @@
     window.CHANNEL_ID = "{{ channel.channel_id }}";
   </script>
   <script src="/static/js/videos.js"></script>
+  <script src="/static/js/log_strip.js"></script>
 </body>
 </html>

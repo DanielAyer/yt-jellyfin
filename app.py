@@ -44,6 +44,7 @@ try:
     from disk_space import check_library_space, check_space
     from scheduler import start_scheduler, apply_schedule
     from updater import check_for_updates, apply_update
+    from system_check import check_dependencies, review_boot_logs, get_channel_logs
     if _is_setup_complete():
         init_db()
     else:
@@ -309,6 +310,78 @@ def update_result():
         "in_progress": busy,
         "result":      _update_result if not busy else None,
     })
+
+
+# ── system status API ──────────────────────────────────────────────────────────
+
+@app.route("/api/system/status")
+def system_status():
+    """Dependency check results. Cached in memory after first run."""
+    try:
+        deps = check_dependencies()
+        all_ok = all(d["ok"] for d in deps)
+        return jsonify({"ok": all_ok, "dependencies": deps})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
+@app.route("/api/logs/boot-summary")
+def logs_boot_summary():
+    """Error summary from boot log review window (uses settings for N and unit)."""
+    try:
+        with get_db() as conn:
+            s = {r["key"]: r["value"] for r in conn.execute("SELECT key, value FROM settings").fetchall()}
+        n    = float(s.get("log_review_n", 6))
+        unit = s.get("log_review_unit", "hours")
+        result = review_boot_logs(n, unit)
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({"has_errors": False, "error": str(e)}), 500
+
+
+@app.route("/api/logs/context")
+def logs_context():
+    """
+    Contextual logs for a page.
+    Query params:
+      source=system|channel|add_channel|settings  (optional filter)
+      channel_id=<id>  (if set, fetches channel-specific logs)
+      limit=50
+    """
+    channel_id = request.args.get("channel_id")
+    limit      = min(int(request.args.get("limit", 50)), 200)
+
+    if channel_id:
+        try:
+            with get_db() as conn:
+                ch = conn.execute(
+                    "SELECT channel_name FROM channels WHERE channel_id = ?", (channel_id,)
+                ).fetchone()
+            if ch:
+                entries = get_channel_logs(ch["channel_name"], limit)
+                # Also include failed/downloaded DB records
+                with get_db() as conn:
+                    rows = conn.execute(
+                        """SELECT title, status, downloaded_at FROM videos
+                           WHERE channel_id = ? AND status IN ('failed','downloaded')
+                           ORDER BY downloaded_at DESC LIMIT ?""",
+                        (channel_id, limit)
+                    ).fetchall()
+                for row in rows:
+                    color = "#e05252" if row["status"] == "failed" else "#c792ea"
+                    entries.append({
+                        "timestamp": (row["downloaded_at"] or "")[:15],
+                        "level":     "ERROR" if row["status"] == "failed" else "INFO",
+                        "source":    "channel",
+                        "color":     color,
+                        "message":   f"{row['status'].upper()}: {row['title']}",
+                    })
+                entries.sort(key=lambda e: e.get("timestamp", ""))
+                return jsonify({"entries": entries[-limit:]})
+        except Exception as e:
+            return jsonify({"entries": [], "error": str(e)}), 500
+
+    return jsonify({"entries": []})
 
 
 # ── disk space API ─────────────────────────────────────────────────────────────
@@ -716,7 +789,8 @@ def update_settings():
         "n_catalog", "m_recent",
         "disk_threshold_pct",
         "rebase_missing_action",
-        # TODO: scheduled sync — add back as advanced option in future
+        "log_review_n",
+        "log_review_unit",
     }
     with get_db() as conn:
         for key, value in data.items():

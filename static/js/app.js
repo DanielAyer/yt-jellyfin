@@ -295,6 +295,9 @@ document.getElementById("btn-settings").addEventListener("click", async () => {
     document.getElementById("pref-n-catalog").value  = s.n_catalog  || 5;
     document.getElementById("pref-m-recent").value   = s.m_recent   || 5;
     document.getElementById("disk-threshold").value  = s.disk_threshold_pct || 10;
+    document.getElementById("log-review-n").value    = s.log_review_n    || 6;
+    const unitEl = document.getElementById("log-review-unit");
+    if (unitEl) unitEl.value = s.log_review_unit || "hours";
     document.querySelectorAll('input[name="rebase_missing_action"]').forEach(r => {
       r.checked = r.value === (s.rebase_missing_action || "download");
     });
@@ -316,11 +319,23 @@ document.getElementById("close-settings").addEventListener("click", () => {
 });
 
 document.getElementById("btn-save-settings").addEventListener("click", async () => {
+  // Validate log review N (must be int or float > 0)
+  const logN = document.getElementById("log-review-n").value.trim();
+  const logNVal = parseFloat(logN);
+  const logErrEl = document.getElementById("log-review-error");
+  if (isNaN(logNVal) || logNVal <= 0) {
+    if (logErrEl) { logErrEl.textContent = "Log review window must be a positive number."; }
+    return;
+  }
+  if (logErrEl) logErrEl.textContent = "";
+
   const body = {
     n_catalog:              document.getElementById("pref-n-catalog").value,
     m_recent:               document.getElementById("pref-m-recent").value,
     disk_threshold_pct:     document.getElementById("disk-threshold").value,
     rebase_missing_action:  document.querySelector('input[name="rebase_missing_action"]:checked')?.value || "download",
+    log_review_n:           logNVal.toString(),
+    log_review_unit:        document.getElementById("log-review-unit")?.value || "hours",
   };
   const status = document.getElementById("settings-status");
   try {
@@ -542,6 +557,42 @@ function handleApiError(e, card) {
   if (card) setCardBusy(card, false);
 }
 
+/* ── dependency panel + boot summary ─────────────────────────────────── */
+async function loadSystemStatus() {
+  try {
+    const data = await api("/api/system/status");
+    const panel = document.getElementById("dep-panel");
+    const grid  = document.getElementById("dep-grid");
+    if (!panel || !grid) return;
+
+    grid.innerHTML = "";
+    (data.dependencies || []).forEach(dep => {
+      const el = document.createElement("div");
+      el.className = "dep-item";
+      const cls  = dep.ok ? "dep-ok" : "dep-err";
+      const icon = dep.ok ? "✓" : "✗";
+      el.innerHTML = `<span class="dep-icon ${cls}">${icon}</span>
+        <span class="${cls}">${dep.name}</span>
+        ${dep.version ? `<span style="color:var(--muted)">${dep.version}</span>` : ""}`;
+      if (dep.message) el.title = dep.message;
+      grid.appendChild(el);
+    });
+    panel.classList.remove("hidden");
+  } catch (_) {}
+}
+
+async function loadBootSummary() {
+  try {
+    const data = await api("/api/logs/boot-summary");
+    const banner = document.getElementById("errors-banner");
+    if (banner && data.has_errors) {
+      banner.classList.remove("hidden");
+    }
+  } catch (_) {}
+}
+
+/* ── settings modal load — add log review fields ─────────────────────── */
+
 /* ── auto-refresh every 60s ──────────────────────────────────────────── */
 setInterval(loadChannels, 60_000);
 setInterval(checkDiskSpace, 60_000);
@@ -549,3 +600,5 @@ setInterval(checkDiskSpace, 60_000);
 /* ── init ────────────────────────────────────────────────────────────── */
 loadChannels();
 checkDiskSpace();
+loadSystemStatus();
+loadBootSummary();
