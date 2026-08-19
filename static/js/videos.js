@@ -102,8 +102,58 @@ function renderGrid() {
     tile.querySelector(".tile-title").textContent = v.title || v.video_id;
     tile.querySelector(".tile-date").textContent  = fmtUploadDate(v.upload_date);
 
-    // click handler
-    tile.addEventListener("click", () => toggleTile(tile, v.video_id));
+    // failed state
+    const isFailed = v.status === "failed";
+    if (isFailed) tile.classList.add("failed");
+
+    // failed badge + action buttons
+    if (isFailed) {
+      const failBadge = tile.querySelector(".tile-failed-badge");
+      if (failBadge) failBadge.classList.remove("hidden");
+    }
+
+    // delete button
+    const delBtn = tile.querySelector(".tile-delete-btn");
+    if (delBtn) {
+      delBtn.addEventListener("click", async (e) => {
+        e.stopPropagation();
+        if (!confirm(`Delete "${v.title}"? The file will be removed from disk.`)) return;
+        try {
+          await api(`/api/videos/${v.video_id}`, { method: "DELETE" });
+          allVideos = allVideos.filter(x => x.video_id !== v.video_id);
+          renderGrid();
+        } catch (err) { showAlert(`Delete failed: ${err.message}`); }
+      });
+    }
+
+    // retry button (failed videos only)
+    const retryBtn = tile.querySelector(".tile-retry-btn");
+    if (retryBtn) {
+      if (isFailed) {
+        retryBtn.classList.remove("hidden");
+        retryBtn.addEventListener("click", async (e) => {
+          e.stopPropagation();
+          try {
+            await api(`/api/channels/${CHANNEL_ID}/download`, {
+              method: "POST", body: { video_ids: [v.video_id] }
+            });
+            // Reset status optimistically
+            v.status = "pending";
+            tile.classList.remove("failed");
+            retryBtn.classList.add("hidden");
+            showAlert("Retry queued.");
+          } catch (err) { showAlert(`Retry failed: ${err.message}`); }
+        });
+      } else {
+        retryBtn.classList.add("hidden");
+      }
+    }
+
+    // click handler (don't navigate if clicking action buttons)
+    tile.addEventListener("click", (e) => {
+      if (e.target.closest(".tile-actions")) return;
+      toggleTile(tile, v.video_id);
+    });
 
     grid.appendChild(frag);
   });
@@ -219,7 +269,9 @@ async function _startDownload(endpoint, label, body = {}) {
       try {
         const prog = await api(`/api/channels/${CHANNEL_ID}/progress`);
         if (prog.active && prog.total > 0) {
-          progressLabel.textContent = prog.label || "Downloading";
+          progressLabel.textContent = prog.title
+            ? prog.title + (prog.eta ? ` — ETA ${prog.eta}` : "")
+            : (prog.label || "Downloading");
           progressCount.textContent = `${prog.current} of ${prog.total}`;
           progressBar.style.width   = `${prog.pct}%`;
         } else {

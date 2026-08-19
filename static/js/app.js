@@ -374,11 +374,15 @@ async function pollUntilDone(taskId, card, channelId, maxWait = 300000) {
     try {
       // Update progress
       const prog = await api(`/api/channels/${channelId}/progress`);
-      if (prog.active && prog.total > 0) {
+      if (prog.active) {
         progressEl.classList.remove("hidden");
-        progressLabel.textContent = prog.label || "Downloading";
-        progressCount.textContent = `${prog.current} of ${prog.total}`;
-        progressBar.style.width   = `${prog.pct}%`;
+        const titleStr = prog.title ? `${prog.title}` : (prog.label || "Downloading");
+        const etaStr   = prog.eta   ? ` — ETA ${prog.eta}` : "";
+        progressLabel.textContent = titleStr + etaStr;
+        progressCount.textContent = prog.total > 0
+          ? `${prog.current} of ${prog.total} (${prog.pct}%)`
+          : `${prog.pct}%`;
+        progressBar.style.width = `${prog.pct}%`;
       }
 
       const tasks = await api("/api/tasks/status");
@@ -556,6 +560,22 @@ function handleApiError(e, card) {
   }
   if (card) setCardBusy(card, false);
 }
+
+/* ── jellyfin rescan ─────────────────────────────────────────────────── */
+document.getElementById("btn-jellyfin-rescan")?.addEventListener("click", async () => {
+  const btn = document.getElementById("btn-jellyfin-rescan");
+  btn.disabled = true;
+  btn.textContent = "Scanning…";
+  try {
+    const r = await api("/api/jellyfin/rescan", { method: "POST" });
+    showAlert(r.message || "Jellyfin scan started.");
+  } catch (e) {
+    showAlert(`Rescan failed: ${e.message}`);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = "⟳ Rescan Into Jellyfin";
+  }
+});
 
 /* ── dependency panel + boot summary ─────────────────────────────────── */
 async function loadSystemStatus() {

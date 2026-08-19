@@ -248,3 +248,38 @@
 @media (max-width: 380px) {
   .video-grid { grid-template-columns: 1fr; }
 }
+
+/* ── failed tile ─────────────────────────────────────────────────────── */
+.video-tile.failed { border-color: var(--danger); opacity: 0.85; }
+.tile-failed-badge {
+  position: absolute;
+  bottom: 0.4rem; left: 0.4rem;
+  background: var(--danger);
+  color: #fff;
+  font-family: var(--mono);
+  font-size: 0.65rem;
+  font-weight: 700;
+  padding: 0.15rem 0.45rem;
+  border-radius: 3px;
+}
+
+/* ── tile actions (delete / retry) ───────────────────────────────────── */
+.tile-actions {
+  display: flex;
+  gap: 0.3rem;
+  padding: 0.3rem 0.4rem 0.4rem;
+  justify-content: flex-end;
+}
+.tile-retry-btn, .tile-delete-btn {
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  color: var(--muted);
+  cursor: pointer;
+  font-family: var(--mono);
+  font-size: 0.65rem;
+  padding: 0.15rem 0.4rem;
+  transition: color 0.15s, border-color 0.15s;
+}
+.tile-retry-btn:hover { color: var(--accent); border-color: var(--accent); }
+.tile-delete-btn:hover { color: var(--danger); border-color: var(--danger); }

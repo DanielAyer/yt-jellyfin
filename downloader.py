@@ -122,16 +122,34 @@ def _run_ytdlp(*args, capture=True):
     return r
 
 
-def _run_ytdlp_tracked(channel_id: str, *args) -> int:
+def _run_ytdlp_tracked(channel_id: str, *args, title_cb=None) -> int:
     """
     Run yt-dlp as a tracked Popen process so it can be killed via force_stop.
+    Reads stdout line by line to extract download progress and current video title.
     Returns the exit code, or -1 if killed.
     """
     cmd = ["yt-dlp", "--no-color", *args]
-    log.debug("yt-dlp (tracked) %s", " ".join(args))
-    proc = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    log.debug("yt-dlp (tracked) %s", " ".join(str(a) for a in args))
+    proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                            text=True, bufsize=1)
     _register_proc(channel_id, proc)
+    current_title = ""
     try:
+        for line in proc.stdout:
+            line = line.rstrip()
+            # Parse current video title: "[youtube] <id>: Downloading webpage"
+            # or "[info] <id>: Downloading 1 format(s)"
+            # or "[download] Destination: Title [id].ext"
+            if "[download] Destination:" in line:
+                # Extract filename as title proxy
+                dest = line.split("Destination:", 1)[-1].strip()
+                current_title = dest[:60] + ("…" if len(dest) > 60 else "")
+            # Parse progress: "[download]  45.2% of 234.50MiB at 2.30MiB/s ETA 01:23"
+            m = re.search(r"\[download\]\s+([\d.]+)%.*?ETA\s+(\S+)", line)
+            if m and title_cb:
+                pct = float(m.group(1))
+                eta = m.group(2)
+                title_cb(channel_id, current_title, pct, eta)
         proc.wait()
         return proc.returncode
     except Exception:
@@ -602,7 +620,7 @@ def estimate_download_size(video_ids: list[str], channel_id: str) -> dict:
     }
 
 
-def download_video(video_id: str, channel_name: str, channel_id: str) -> bool:
+def download_video(video_id: str, channel_name: str, channel_id: str, title_cb=None) -> bool:
     """
     Download a single video using yt-dlp.
 
@@ -638,9 +656,9 @@ def download_video(video_id: str, channel_name: str, channel_id: str) -> bool:
         "--output",              out_path,
         "--no-playlist",
         "--embed-metadata",
-        "--no-progress",
         "--js-runtimes",         "node",
         url,
+        title_cb=title_cb,
     )
 
     if exit_code != 0:
@@ -677,7 +695,7 @@ def _find_file_by_title(directory: str, title: str) -> str | None:
     return None
 
 
-def download_next_n(channel_id: str, n: int, progress_cb=None) -> dict:
+def download_next_n(channel_id: str, n: int, progress_cb=None, title_cb=None) -> dict:
     """Download the next N oldest undownloaded videos (back catalog order)."""
     with get_db() as conn:
         rows = conn.execute(
@@ -686,10 +704,10 @@ def download_next_n(channel_id: str, n: int, progress_cb=None) -> dict:
                ORDER BY upload_date ASC LIMIT ?""",
             (channel_id, n),
         ).fetchall()
-    return download_videos_by_id([r["video_id"] for r in rows], channel_id, progress_cb)
+    return download_videos_by_id([r["video_id"] for r in rows], channel_id, progress_cb, title_cb)
 
 
-def download_latest_m(channel_id: str, m: int, progress_cb=None) -> dict:
+def download_latest_m(channel_id: str, m: int, progress_cb=None, title_cb=None) -> dict:
     """Download the M most recent undownloaded videos."""
     with get_db() as conn:
         rows = conn.execute(
@@ -698,10 +716,10 @@ def download_latest_m(channel_id: str, m: int, progress_cb=None) -> dict:
                ORDER BY upload_date DESC LIMIT ?""",
             (channel_id, m),
         ).fetchall()
-    return download_videos_by_id([r["video_id"] for r in rows], channel_id, progress_cb)
+    return download_videos_by_id([r["video_id"] for r in rows], channel_id, progress_cb, title_cb)
 
 
-def download_all_pending(channel_id: str, progress_cb=None) -> dict:
+def download_all_pending(channel_id: str, progress_cb=None, title_cb=None) -> dict:
     """Download all undownloaded videos for a channel."""
     with get_db() as conn:
         rows = conn.execute(
@@ -710,10 +728,10 @@ def download_all_pending(channel_id: str, progress_cb=None) -> dict:
                ORDER BY upload_date DESC""",
             (channel_id,),
         ).fetchall()
-    return download_videos_by_id([r["video_id"] for r in rows], channel_id, progress_cb)
+    return download_videos_by_id([r["video_id"] for r in rows], channel_id, progress_cb, title_cb)
 
 
-def download_videos_by_id(video_ids: list[str], channel_id: str, progress_cb=None) -> dict:
+def download_videos_by_id(video_ids: list[str], channel_id: str, progress_cb=None, title_cb=None) -> dict:
     with get_db() as conn:
         ch = conn.execute(
             "SELECT * FROM channels WHERE channel_id = ?", (channel_id,)
@@ -726,7 +744,7 @@ def download_videos_by_id(video_ids: list[str], channel_id: str, progress_cb=Non
     for i, vid in enumerate(video_ids):
         if progress_cb:
             progress_cb(channel_id, i, total, "Downloading")
-        ok = download_video(vid, ch["channel_name"], channel_id)
+        ok = download_video(vid, ch["channel_name"], channel_id, title_cb=title_cb)
         (results["downloaded"] if ok else results["failed"]).append(vid)
 
     if progress_cb:

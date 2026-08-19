@@ -56,7 +56,7 @@ except Exception as e:
 # ── background task runner ─────────────────────────────────────────────────────
 
 _running_tasks: dict[str, bool] = {}
-_task_progress: dict[str, dict] = {}  # channel_id → {current, total, label}
+_task_progress: dict[str, dict] = {}  # channel_id → {active, current, total, pct, label, title, eta}
 _task_lock = threading.Lock()
 
 
@@ -69,7 +69,6 @@ def _bg(task_id: str, fn, *args, **kwargs):
         finally:
             with _task_lock:
                 _running_tasks[task_id] = False
-            # Clear progress when task completes
             channel_id = task_id.split("_", 1)[-1] if "_" in task_id else task_id
             with _task_lock:
                 _task_progress.pop(channel_id, None)
@@ -83,14 +82,29 @@ def _is_busy(task_id: str) -> bool:
 
 
 def update_progress(channel_id: str, current: int, total: int, label: str = "Downloading"):
-    """Called by downloader functions to report per-video progress."""
     with _task_lock:
+        existing = _task_progress.get(channel_id, {})
         _task_progress[channel_id] = {
             "active":  True,
             "current": current,
             "total":   total,
             "label":   label,
             "pct":     round((current / total) * 100) if total else 0,
+            "title":   existing.get("title", ""),
+            "eta":     existing.get("eta", ""),
+        }
+
+
+def update_title_status(channel_id: str, title: str, pct: float, eta: str):
+    """Called by yt-dlp stdout parser with per-file progress."""
+    with _task_lock:
+        existing = _task_progress.get(channel_id, {})
+        _task_progress[channel_id] = {
+            **existing,
+            "active": True,
+            "title":  title,
+            "pct":    round(pct),
+            "eta":    eta,
         }
 
 
@@ -392,6 +406,44 @@ def disk_status():
     return jsonify(result)
 
 
+# ── Jellyfin rescan API ────────────────────────────────────────────────────────
+
+@app.route("/api/jellyfin/rescan", methods=["POST"])
+def jellyfin_rescan():
+    """
+    Trigger a Jellyfin library scan via the Jellyfin API.
+    Uses JELLYFIN_URL and JELLYFIN_API_KEY from config/.env.
+    """
+    from config import JELLYFIN_URL, JELLYFIN_API_KEY
+    import urllib.request, urllib.error
+
+    if not JELLYFIN_URL or not JELLYFIN_API_KEY:
+        return jsonify({
+            "ok": False,
+            "error": "Jellyfin URL or API key not configured. "
+                     "Re-run the setup wizard to configure Jellyfin integration.",
+        }), 400
+
+    url = JELLYFIN_URL.rstrip("/") + "/Library/Refresh"
+    try:
+        req = urllib.request.Request(
+            url, method="POST",
+            headers={"X-Emby-Token": JELLYFIN_API_KEY, "Content-Length": "0"},
+            data=b"",
+        )
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            status = resp.status
+        if status in (200, 204):
+            return jsonify({"ok": True, "message": "Jellyfin library scan started."})
+        return jsonify({"ok": False, "error": f"Jellyfin returned HTTP {status}"}), 500
+    except urllib.error.HTTPError as e:
+        return jsonify({"ok": False, "error": f"Jellyfin returned HTTP {e.code}. Check your API key."}), 400
+    except urllib.error.URLError as e:
+        return jsonify({"ok": False, "error": f"Could not reach Jellyfin at {JELLYFIN_URL}: {e}"}), 503
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
 # ── channels API ───────────────────────────────────────────────────────────────
 
 @app.route("/api/channels", methods=["GET"])
@@ -642,7 +694,7 @@ def download_next_n_route(channel_id):
 
     settings = get_channel_settings(channel_id)
     n = int(request.json.get("n", settings["n_catalog"])) if request.json else settings["n_catalog"]
-    _bg(task_id, download_next_n, channel_id, n, update_progress)
+    _bg(task_id, download_next_n, channel_id, n, update_progress, update_title_status)
     return jsonify({"ok": True, "message": f"Downloading next {n} videos"})
 
 
@@ -659,7 +711,7 @@ def download_latest_m_route(channel_id):
 
     settings = get_channel_settings(channel_id)
     m = int(request.json.get("m", settings["m_recent"])) if request.json else settings["m_recent"]
-    _bg(task_id, download_latest_m, channel_id, m, update_progress)
+    _bg(task_id, download_latest_m, channel_id, m, update_progress, update_title_status)
     return jsonify({"ok": True, "message": f"Downloading latest {m} videos"})
 
 
@@ -674,7 +726,7 @@ def download_all_route(channel_id):
     if _is_busy(task_id):
         return jsonify({"error": "already running"}), 409
 
-    _bg(task_id, download_all_pending, channel_id, update_progress)
+    _bg(task_id, download_all_pending, channel_id, update_progress, update_title_status)
     return jsonify({"ok": True, "message": "Downloading all pending videos"})
 
 
@@ -734,7 +786,7 @@ def download_selected(channel_id):
     if _is_busy(task_id):
         return jsonify({"error": "already running"}), 409
 
-    _bg(task_id, download_videos_by_id, video_ids, channel_id, update_progress)
+    _bg(task_id, download_videos_by_id, video_ids, channel_id, update_progress, update_title_status)
     return jsonify({"ok": True, "message": f"downloading {len(video_ids)} videos"})
 
 
@@ -759,12 +811,13 @@ def sync_all():
 
 @app.route("/api/channels/<channel_id>/progress")
 def channel_progress(channel_id):
-    """Return current download progress for a channel."""
+    """Return current download progress including current video title and ETA."""
     with _task_lock:
         progress = _task_progress.get(channel_id)
     if progress:
         return jsonify(progress)
-    return jsonify({"active": False, "current": 0, "total": 0, "pct": 0, "label": ""})
+    return jsonify({"active": False, "current": 0, "total": 0, "pct": 0,
+                    "label": "", "title": "", "eta": ""})
 
 
 @app.route("/api/tasks/status")
